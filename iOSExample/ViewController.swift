@@ -1,8 +1,8 @@
 //
 //  ViewController.swift
-//  SwiftyUIDemo
+//  iOSExample
 //
-//  Created by Haochen Wang on 10/5/17.
+//  Created by Haochen Wang on 10/6/17.
 //  Copyright © 2017 Haochen Wang. All rights reserved.
 //
 
@@ -22,13 +22,13 @@ class ViewController: UIViewController {
         let myImage : UIImage? = UIImage.load("btnBG")
         let myImageView : SwiftyImageView = SwiftyImageView.load(myImage).addTo(view)
         myImageView.frame = CGRect.init(x: 50, y: 150 + 20, width: 100, height: 100)
-
+        
         
         let myLable : SwiftyLabel = SwiftyLabel.load("Label", .white, .blue).addTo(view)
         myLable.frame = CGRect.init(x: 50, y: 300 + 20 + 20, width: 100, height: 100)
-
+        
         let myBtn : SwiftyButton = SwiftyButton.load("Button", myImage, ClosureWrapper({ [weak self] (btn) in
-
+            
             guard let strongSelf = self, let btn = btn else { return }
             print("BtnTaped")
             strongSelf.btnTappedSelector(btn)

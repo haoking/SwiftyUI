@@ -1,0 +1,11 @@
+framework module SwiftyUI {
+  umbrella header "SwiftyUI.h"
+
+  export *
+  module * { export * }
+}
+
+module SwiftyUI.Swift {
+    header "SwiftyUI-Swift.h"
+    requires objc
+}

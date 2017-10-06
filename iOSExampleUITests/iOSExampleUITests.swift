@@ -1,14 +1,14 @@
 //
-//  SwiftyUIDemoUITests.swift
-//  SwiftyUIDemoUITests
+//  iOSExampleUITests.swift
+//  iOSExampleUITests
 //
-//  Created by Haochen Wang on 10/5/17.
+//  Created by Haochen Wang on 10/6/17.
 //  Copyright © 2017 Haochen Wang. All rights reserved.
 //
 
 import XCTest
 
-class SwiftyUIDemoUITests: XCTestCase {
+class iOSExampleUITests: XCTestCase {
         
     override func setUp() {
         super.setUp()
