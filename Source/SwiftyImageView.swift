@@ -10,7 +10,7 @@ import UIKit
 
 public class SwiftyImageView: UIView, ImageSettable
 {
-    var image: UIImage? {
+    public var image: UIImage? {
         get { return backgroundImage }
         set {
             backgroundImage = newValue
@@ -24,7 +24,7 @@ public class SwiftyImageView: UIView, ImageSettable
         isUserInteractionEnabled = false
     }
     
-    required public init?(coder aDecoder: NSCoder) {
+    public required init?(coder aDecoder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
     
@@ -122,7 +122,7 @@ extension SwiftyImageView
         }
     }
     
-    public func run(_ imageTransition: ImageTransition, with image: UIImage)
+    public func transition(_ imageTransition: ImageTransition, with image: UIImage)
     {
         UIView.transition(with: self, duration: imageTransition.duration, options: imageTransition.animationOptions, animations: { imageTransition.animations(self, image) }, completion: imageTransition.completion)
     }

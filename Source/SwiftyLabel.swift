@@ -13,23 +13,23 @@ public class SwiftyLabel: UIView, TextEditable
     private init(_ text: String? = nil, _ textColor: UIColor? = nil, _ backgroundColor: UIColor? = nil)
     {
         super.init(frame: .zero)
-        self.text = text
-        
-        if let textColor = textColor
-        {
-            self.textColor = textColor
-        }
-        
-        self.backgroundColor = backgroundColor
-        
-        isUserInteractionEnabled = false
+        loadText()
+        usesIntrinsicContentSize = true
         textAlignment = .center
+        font = .systemFont(ofSize: UIFont.systemFontSize)
+        paragraphStyle = .default
+        numberOfLines = 0
+        padding = 0
+        lineBreakMode = .byTruncatingTail
+        
         isHidden = false
         alpha = 1.0
         contentMode = .redraw
-        lineBreakMode = .byTruncatingTail
-        padding = 0
-        loadText()
+        isUserInteractionEnabled = false
+        
+        self.text = text
+        self.textColor = textColor
+        self.backgroundColor = backgroundColor
     }
     
     public required init?(coder aDecoder: NSCoder)
@@ -52,7 +52,6 @@ extension SwiftyLabel
     
     open override func draw(_ rect: CGRect)
     {
-        super.draw(rect)
         overrideDraw(rect)
     }
     

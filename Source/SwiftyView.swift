@@ -10,7 +10,7 @@ import UIKit
 
 public class SwiftyView : UIView
 {
-    public init()
+    private init()
     {
         super.init(frame: .zero)
         backgroundColor = .clear
@@ -18,15 +18,20 @@ public class SwiftyView : UIView
         alpha = 1.0
     }
 
-    required public init?(coder aDecoder: NSCoder) {
+    public required init?(coder aDecoder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+    
+    public final class func load() -> SwiftyView
+    {
+        return SwiftyView()
     }
 }
 
 extension UIView
 {
     @discardableResult
-    public func addTo( _ view: UIView) -> Self
+    public final func addTo( _ view: UIView) -> Self
     {
         UIView.methodExchange
         view.addSubview(self)
@@ -42,25 +47,17 @@ extension UIView
         let originalAlphaSelector : Selector = #selector(setter: alpha)
         let swizzledAlphaSelector : Selector = #selector(updateAlpha(_:))
         swizzleInstance(originalAlphaSelector, swizzledAlphaSelector)
-        
-        let originalBackgroundColorGetterSelector : Selector = #selector(getter: backgroundColor)
-        let swizzledBackgroundColorGetterSelector : Selector = #selector(currentBackgroundColor)
-        swizzleInstance(originalBackgroundColorGetterSelector, swizzledBackgroundColorGetterSelector)
     }()
     
-    @objc private func updateBackgroundColor(_ color: UIColor?)
+    @objc
+    private func updateBackgroundColor(_ color: UIColor?)
     {
-        layer.backgroundColor = color?.cgColor
+        updateBackgroundColor(color)
         updateOpaque()
     }
     
-    @objc private func currentBackgroundColor() -> UIColor?
-    {
-        guard let currentColor = layer.backgroundColor else { return nil }
-        return UIColor(cgColor: currentColor)
-    }
-    
-    @objc private func updateAlpha(_ alpha: CGFloat)
+    @objc
+    private func updateAlpha(_ alpha: CGFloat)
     {
         updateAlpha(alpha)
         updateOpaque()
@@ -68,7 +65,7 @@ extension UIView
     
     open func updateOpaque()
     {
-        if let color = layer.backgroundColor, UIColor(cgColor: color).alphaValue == 1.0, alpha == 1.0
+        if let color = backgroundColor, color.alphaValue == 1.0, alpha == 1.0
         {
             isOpaque = true
         }

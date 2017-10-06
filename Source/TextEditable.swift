@@ -64,13 +64,10 @@ public enum TextContentAlignment: Int {
 
 public protocol TextEditable: class
 {
-//    var container: NSTextContainer { get set }
-//    var layoutManager: NSLayoutManager { get set }
-    
     var usesIntrinsicContentSize: Bool { get set }
     var textAlignment: TextContentAlignment { get set }
     var font : UIFont { get set }
-    var textColor : UIColor { get set }
+    var textColor : UIColor? { get set }
     var paragraphStyle : NSParagraphStyle { get set }
     var numberOfLines: Int { get set }
     var padding: CGFloat { get set }
@@ -84,6 +81,7 @@ public protocol TextEditable: class
 
 public extension TextEditable where Self: UIView
 {
+    //required
     public func loadText()
     {
         layoutManager.addTextContainer(container)
@@ -143,7 +141,7 @@ public extension TextEditable where Self: UIView
 
 extension TextEditable where Self: UIView
 {
-    internal var container : NSTextContainer {
+    fileprivate var container : NSTextContainer {
         get {
             guard let obj = objc_getAssociatedObject(self, TextContentAlignment.TextEditablePrivateSwiftyAssociatedKeys.containerKey) as? NSTextContainer else {
                 
@@ -157,7 +155,7 @@ extension TextEditable where Self: UIView
         }
     }
     
-    var layoutManager : NSLayoutManager {
+    fileprivate var layoutManager : NSLayoutManager {
         get {
             guard let obj = objc_getAssociatedObject(self, TextContentAlignment.TextEditablePrivateSwiftyAssociatedKeys.layoutManagerKey) as? NSLayoutManager else {
                 
@@ -175,7 +173,7 @@ extension TextEditable where Self: UIView
 
 public extension TextEditable where Self: UIView
 {
-    var usesIntrinsicContentSize : Bool {
+    public var usesIntrinsicContentSize : Bool {
         get {
             guard let obj = objc_getAssociatedObject(self, TextContentAlignment.TextEditablePublicSwiftyAssociatedKeys.usesIntrinsicContentSizeKey) as? Bool else {
                 
@@ -193,7 +191,7 @@ public extension TextEditable where Self: UIView
         }
     }
     
-    var textAlignment : TextContentAlignment {
+    public var textAlignment : TextContentAlignment {
         get {
             guard let obj = objc_getAssociatedObject(self, TextContentAlignment.TextEditablePublicSwiftyAssociatedKeys.textAlignmentKey) as? TextContentAlignment else {
                 
@@ -211,7 +209,7 @@ public extension TextEditable where Self: UIView
         }
     }
     
-    var font : UIFont {
+    public var font : UIFont {
         get {
             guard let obj = objc_getAssociatedObject(self, TextContentAlignment.TextEditablePublicSwiftyAssociatedKeys.fontKey) as? UIFont else {
                 
@@ -229,7 +227,7 @@ public extension TextEditable where Self: UIView
         }
     }
     
-    public var textColor : UIColor {
+    public var textColor : UIColor? {
         get {
             guard let obj = objc_getAssociatedObject(self, TextContentAlignment.TextEditablePublicSwiftyAssociatedKeys.textColorKey) as? UIColor else {
                 
@@ -354,12 +352,12 @@ public extension TextEditable where Self: UIView
         return nil
     }
     
-    internal func mergeAttributes(_ attributedText: NSAttributedString) -> NSAttributedString
+    fileprivate func mergeAttributes(_ attributedText: NSAttributedString) -> NSAttributedString
     {
         let attrString = NSMutableAttributedString(attributedString: attributedText)
         
         attrString.addAttribute(.font, attr: font)
-        attrString.addAttribute(.foregroundColor, attr: textColor)
+        attrString.addAttribute(.foregroundColor, attr: textColor!)
         attrString.addAttribute(.paragraphStyle, attr: paragraphStyle)
         
         if let shadow = shadow
@@ -374,7 +372,7 @@ public extension TextEditable where Self: UIView
 fileprivate extension NSMutableAttributedString
 {
     @discardableResult
-    fileprivate func addAttribute(_ attrName: NSAttributedStringKey, attr: AnyObject, in range: NSRange? = nil) -> Self
+    fileprivate final func addAttribute(_ attrName: NSAttributedStringKey, attr: AnyObject, in range: NSRange? = nil) -> Self
     {
         let range = range ?? NSRange(location: 0, length: length)
         enumerateAttribute(attrName, in: range, options: .reverse) { object, range, pointer in

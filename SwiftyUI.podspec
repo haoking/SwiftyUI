@@ -93,8 +93,8 @@ Pod::Spec.new do |s|
 
   s.source_files  = 'Source/*.swift'
 
-  s.ios.deployment_target = '8.0'
-  s.ios.vendored_frameworks = 'SwiftyUI.framework'
+  # s.ios.deployment_target = '8.0'
+  # s.ios.vendored_frameworks = 'SwiftyUI.framework'
   # s.exclude_files = "Classes/Exclude"
 
   # s.public_header_files = "Classes/**/*.h"

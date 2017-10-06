@@ -8,14 +8,14 @@
 
 import UIKit
 
-protocol ImageSettable: class
+public protocol ImageSettable: class
 {
     var backgroundImage: UIImage? { get set }
 }
 
-extension ImageSettable where Self: UIView
+public extension ImageSettable where Self: UIView
 {
-    var backgroundImage: UIImage? {
+    public var backgroundImage: UIImage? {
         get {
             guard let obj = layer.contents else { return nil }
             return UIImage(cgImage: obj as! CGImage)

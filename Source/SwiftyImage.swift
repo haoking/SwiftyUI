@@ -11,7 +11,7 @@ import UIKit
 
 extension UIImage
 {
-    public class func load(_ data: Data) -> UIImage?
+    public final class func load(_ data: Data) -> UIImage?
     {
         var image : UIImage?
         NSLock().locker(ClosureWrapper({ (_) in
@@ -20,7 +20,7 @@ extension UIImage
         return image
     }
 
-    public class func load(_ data: Data, scale: CGFloat) -> UIImage?
+    public final class func load(_ data: Data, scale: CGFloat) -> UIImage?
     {
         var image : UIImage?
         NSLock().locker(ClosureWrapper({ (_) in
@@ -29,7 +29,7 @@ extension UIImage
         return image
     }
     
-    public class func load(_ name: String) -> UIImage?
+    public final class func load(_ name: String) -> UIImage?
     {
         var image : UIImage?
         NSLock().locker(ClosureWrapper({ (_) in
@@ -48,7 +48,7 @@ extension UIImage
         return image
     }
     
-    public class func load(_ aImage: UIImage?, identifier: String) -> UIImage?
+    public final class func load(_ aImage: UIImage?, identifier: String) -> UIImage?
     {
         var image : UIImage?
         NSLock().locker(ClosureWrapper({ (_) in
@@ -70,7 +70,7 @@ extension UIImage
         fileprivate static var isInflatedKey : UnsafeRawPointer = UnsafeRawPointer(UnsafeMutablePointer<UInt8>.allocate(capacity: 1))
     }
     
-    private var isInflated: Bool {
+    private final var isInflated: Bool {
         get {
             guard let obj = objc_getAssociatedObject(self, AssociatedKey.isInflatedKey) as? Bool else {
                 
@@ -91,7 +91,7 @@ extension UIImage
         _ = cgImage?.dataProvider?.data
     }
     
-    open var isOpaque: Bool
+    public final var isOpaque: Bool
     {
         
         let alphaInfo = cgImage?.alphaInfo
