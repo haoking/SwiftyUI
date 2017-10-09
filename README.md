@@ -1,5 +1,5 @@
 # SwiftyUI
-![CocoaPods Compatible](https://img.shields.io/cocoapods/v/SwiftyUI.svg)![Platform](https://img.shields.io/cocoapods/p/SwiftyUI.svg?style=flat)
+![CocoaPods Compatible](https://img.shields.io/cocoapods/v/SwiftyUI.svg)  ![Platform](https://img.shields.io/cocoapods/p/SwiftyUI.svg?style=flat)
 
 High performance(100%) and lightweight(one class each UI) UIView,  UIImage, UIImageView, UIlabel, UIButton and more.
 
