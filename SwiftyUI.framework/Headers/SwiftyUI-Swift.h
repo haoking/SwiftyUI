@@ -232,7 +232,7 @@ SWIFT_CLASS("_TtC8SwiftyUI11SwiftyLabel")
 
 SWIFT_CLASS("_TtC8SwiftyUI10SwiftyView")
 @interface SwiftyView : UIView
-- (nonnull instancetype)init OBJC_DESIGNATED_INITIALIZER;
+- (nonnull instancetype)init SWIFT_UNAVAILABLE;
 - (nullable instancetype)initWithCoder:(NSCoder * _Nonnull)aDecoder OBJC_DESIGNATED_INITIALIZER;
 - (nonnull instancetype)initWithFrame:(CGRect)frame SWIFT_UNAVAILABLE;
 @end

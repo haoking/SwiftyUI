@@ -72,6 +72,16 @@ extension SwiftyButton
             handler(sender)
         }
     }
+    
+    private final var tapForwardHandlerWrapper : ClosureWrapper<SwiftyButton>? {
+        get {
+            guard let wrapper = objc_getAssociatedObject(self, SwiftyAssociatedKeys.tapForwardHandlerKey) as? ClosureWrapper<SwiftyButton> else { return nil }
+            return wrapper
+        }
+        set {
+            objc_setAssociatedObject(self, SwiftyAssociatedKeys.tapForwardHandlerKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        }
+    }
 }
 
 extension UIControl

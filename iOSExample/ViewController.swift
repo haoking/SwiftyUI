@@ -16,15 +16,15 @@ class ViewController: UIViewController {
         super.viewDidLoad()
         
         let myView : SwiftyView = SwiftyView.load().addTo(view)
-        myView.frame = CGRect.init(x: 50, y: 50, width: 100, height: 100)
+        myView.frame = CGRect(x: 50, y: 50, width: 100, height: 100)
         myView.backgroundColor = .black
         
         let myImage : UIImage? = UIImage.load("btnBG")
         let myImageView : SwiftyImageView = SwiftyImageView.load(myImage).addTo(view)
-        myImageView.frame = CGRect.init(x: 50, y: 150 + 20, width: 100, height: 100)
+        myImageView.frame = CGRect(x: 50, y: 150 + 20, width: 100, height: 100)
         
         let myLable : SwiftyLabel = SwiftyLabel.load("Label", .white, .blue).addTo(view)
-        myLable.frame = CGRect.init(x: 50, y: 300 + 20 + 20, width: 100, height: 100)
+        myLable.frame = CGRect(x: 50, y: 300 + 20 + 20, width: 100, height: 100)
         
         let myBtn : SwiftyButton = SwiftyButton.load("Button", myImage, ClosureWrapper({ [weak self] (btn) in
             
