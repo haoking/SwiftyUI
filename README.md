@@ -1,8 +1,6 @@
 # SwiftyUI
 
-![Build Status](https://travis-ci.org/SwiftyUI/SwiftyUI.svg?branch=master)
-
-![CocoaPods Compatible](https://img.shields.io/cocoapods/v/SwiftyUI.svg)  ![Platform](https://img.shields.io/cocoapods/p/SwiftyUI.svg?style=flat)
+![Build Status](https://travis-ci.org/haoking/SwiftyUI.svg?branch=master) ![CocoaPods Compatible](https://img.shields.io/cocoapods/v/SwiftyUI.svg)  ![Platform](https://img.shields.io/cocoapods/p/SwiftyUI.svg?style=flat)
 
 High performance(100%) and lightweight(one class each UI) UIView,  UIImage, UIImageView, UIlabel, UIButton and more.
 
@@ -25,8 +23,8 @@ High performance(100%) and lightweight(one class each UI) UIView,  UIImage, UIIm
 ## Requirements
 
 - iOS 8.0+
-- Xcode 8.3+
-- Swift 3.1+
+- Xcode 9.0+
+- Swift 4.0+
 
 ## Communication
 
@@ -46,7 +44,7 @@ $ gem install cocoapods
 
 > CocoaPods 1.1+ is required.
 
-To integrate AlamofireImage into your Xcode project using CocoaPods, specify it in your `Podfile`:
+To integrateSwiftyUI into your Xcode project using CocoaPods, specify it in your `Podfile`:
 
 ```ruby
 source 'https://github.com/CocoaPods/Specs.git'
