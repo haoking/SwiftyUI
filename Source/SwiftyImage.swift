@@ -14,7 +14,7 @@ extension UIImage
     public final class func load(_ data: Data) -> UIImage?
     {
         var image : UIImage?
-        NSLock().locker(ClosureWrapper({ (_) in
+        NSLock().locker(ClosureVoidWrapper({
             image = UIImage(data: data)
         }))
         return image
@@ -23,7 +23,7 @@ extension UIImage
     public final class func load(_ data: Data, scale: CGFloat) -> UIImage?
     {
         var image : UIImage?
-        NSLock().locker(ClosureWrapper({ (_) in
+        NSLock().locker(ClosureVoidWrapper({
             image = UIImage(data: data, scale: scale)
         }))
         return image
@@ -32,7 +32,7 @@ extension UIImage
     public final class func load(_ name: String) -> UIImage?
     {
         var image : UIImage?
-        NSLock().locker(ClosureWrapper({ (_) in
+        NSLock().locker(ClosureVoidWrapper({
             let imageCachePool : ImageCachePool = .defalut
             if let cacheImage = imageCachePool.image(withIdentifier: name)
             {
@@ -51,7 +51,7 @@ extension UIImage
     public final class func load(_ aImage: UIImage?, identifier: String) -> UIImage?
     {
         var image : UIImage?
-        NSLock().locker(ClosureWrapper({ (_) in
+        NSLock().locker(ClosureVoidWrapper({
             let imageCachePool : ImageCachePool = .defalut
             if let oriImage = aImage
             {

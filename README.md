@@ -1,6 +1,6 @@
-# SwiftyUI
+# SwiftyUI [![Awesome](https://cdn.rawgit.com/sindresorhus/awesome/d7305f38d29fed78fa85652e3a63e154dd8e8829/media/badge.svg)](https://github.com/sindresorhus/awesome) 
 
-![Build Status](https://travis-ci.org/haoking/SwiftyUI.svg?branch=master) ![CocoaPods Compatible](https://img.shields.io/cocoapods/v/SwiftyUI.svg)  ![Platform](https://img.shields.io/cocoapods/p/SwiftyUI.svg?style=flat)
+![Build Status](https://travis-ci.org/haoking/SwiftyUI.svg?branch=master) ![CocoaPods Compatible](https://img.shields.io/cocoapods/v/SwiftyUI.svg) ![Platform](https://img.shields.io/cocoapods/p/SwiftyUI.svg?style=flat) ![Swift 3.0+](https://img.shields.io/badge/Swift-3.0+-orange.svg)
 
 High performance(100%) and lightweight(one class each UI) UIView,  UIImage, UIImageView, UIlabel, UIButton and more.
 
@@ -17,8 +17,8 @@ High performance(100%) and lightweight(one class each UI) UIView,  UIImage, UIIm
 - [x] UI loading thread-safe
 - [x] Block-Package to more easy to use
 - [x] Easy and simple to use, all APIs are same to system APIs
-- [x] ThreadPool auto manage threads depends on active CPUs, and autorelease Runloop inside
-- [x] Promise is a lightweight version of PromiseKit, based partially on Javascript's A+ spec, depends on ThreadPool, an interesting feature is that it can `then` on both main thread and background in one Promise.
+- [x] SwiftyThreadPool auto manage threads depends on active CPUs, and autorelease Runloop inside
+- [x] SwiftyPromise is a lightweight version of PromiseKit, based partially on Javascript's A+ spec, depends on ThreadPool, an interesting feature is that it can `then` on both main thread and background in one Promise.
 
 ## Requirements
 
@@ -213,7 +213,7 @@ let myBtn : SwiftyButton = SwiftyButton.load("Button", myImage, ClosureWrapper({
 myBtn.frame = CGRect(x: 50, y: 450 + 20 + 20 + 20, width: 100, height: 100)
 ```
 
-### ThreadPool
+### SwiftyThreadPool
 
 ThreadPool is used to manage threads which depends on active CPUs, also autorelease Runloop inside.
 
@@ -230,7 +230,7 @@ let myOperation : BlockOperation = .init {
 ThreadPool.defalut.add(myOperation)
 ```
 
-### Promise
+### SwiftyPromise
 
 Everyone knows PromiseKit and its story. I also use this library in my code. But it is too heavy for my code, so I build a lightweight version of PromiseKit, based partially on Javascript's A+ spec, depends on ThreadPool.
 

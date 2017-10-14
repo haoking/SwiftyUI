@@ -1,0 +1,4 @@
+language: objective-c
+osx_image: xcode9
+script:
+ - xcodebuild -scheme iOSExample -sdk iphonesimulator build

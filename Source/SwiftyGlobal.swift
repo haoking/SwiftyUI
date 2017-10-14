@@ -8,6 +8,15 @@
 
 import UIKit
 
+public final class ClosureVoidWrapper
+{
+    public final var closure: (() -> Void)?
+    
+    public init(_ closure: (() -> Void)?) {
+        self.closure = closure
+    }
+}
+
 public final class ClosureWrapper<T>
 {
     public final var closure: ((_ obj: T?) -> Void)?
@@ -17,9 +26,9 @@ public final class ClosureWrapper<T>
     }
 }
 
-public class ClosureThrowWrapper
+public final class ClosureThrowWrapper
 {
-    public var closure: (() throws -> Void)?
+    public final var closure: (() throws -> Void)?
     
     public init(_ closure: (() throws -> Void)?) {
         self.closure = closure
@@ -64,9 +73,9 @@ extension NSLock
         fileprivate static var lockKey : UnsafeRawPointer = UnsafeRawPointer(UnsafeMutablePointer<UInt8>.allocate(capacity: 1))
     }
     
-    private final var lockerHandler : ClosureWrapper<Void>? {
+    private final var lockerHandler : ClosureVoidWrapper? {
         get {
-            guard let wrapper = objc_getAssociatedObject(self, SwiftyAssociatedKeys.lockKey) as? ClosureWrapper<Void> else { return nil }
+            guard let wrapper = objc_getAssociatedObject(self, SwiftyAssociatedKeys.lockKey) as? ClosureVoidWrapper else { return nil }
             return wrapper
         }
         set {
@@ -74,7 +83,7 @@ extension NSLock
         }
     }
     
-    public final func locker(_ wrapper: ClosureWrapper<Void>)
+    public final func locker(_ wrapper: ClosureVoidWrapper)
     {
         let lock = NSLock()
         lock.lock()
@@ -87,7 +96,7 @@ extension NSLock
     {
         if let handler = lockerHandler?.closure
         {
-            handler(nil)
+            handler()
         }
     }
 }
