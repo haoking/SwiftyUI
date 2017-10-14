@@ -16,6 +16,7 @@
 		0C2D75F71F877D9900596281 /* iOSExampleUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C2D75F61F877D9900596281 /* iOSExampleUITests.swift */; };
 		0C2D76021F877DF100596281 /* SwiftyUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0C76514B1F8610800024E56B /* SwiftyUI.framework */; };
 		0C2D76031F877DF100596281 /* SwiftyUI.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 0C76514B1F8610800024E56B /* SwiftyUI.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		0C59CA5B1F91FF6F001DFD7F /* SwiftyTask.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C59CA5A1F91FF6E001DFD7F /* SwiftyTask.swift */; };
 		0C658A881F861293008AEB55 /* SwiftyImageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C76515F1F8611370024E56B /* SwiftyImageView.swift */; };
 		0C658A891F861297008AEB55 /* SwiftyImage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C7651601F8611370024E56B /* SwiftyImage.swift */; };
 		0C658A8A1F861299008AEB55 /* SwiftyButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C7651611F8611370024E56B /* SwiftyButton.swift */; };
@@ -80,6 +81,7 @@
 		0C2D75F21F877D9900596281 /* iOSExampleUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = iOSExampleUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		0C2D75F61F877D9900596281 /* iOSExampleUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSExampleUITests.swift; sourceTree = "<group>"; };
 		0C2D75F81F877D9900596281 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		0C59CA5A1F91FF6E001DFD7F /* SwiftyTask.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwiftyTask.swift; sourceTree = "<group>"; };
 		0C76514B1F8610800024E56B /* SwiftyUI.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = SwiftyUI.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		0C76514E1F8610800024E56B /* SwiftyUI.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = SwiftyUI.h; sourceTree = "<group>"; };
 		0C76514F1F8610800024E56B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -220,6 +222,7 @@
 				0C76515F1F8611370024E56B /* SwiftyImageView.swift */,
 				0C7651631F8611370024E56B /* SwiftyLabel.swift */,
 				0C7651611F8611370024E56B /* SwiftyButton.swift */,
+				0C59CA5A1F91FF6E001DFD7F /* SwiftyTask.swift */,
 				0C2D75CC1F877D2D00596281 /* Protocols */,
 				0C658A831F8611C3008AEB55 /* Supporting Files */,
 			);
@@ -441,6 +444,7 @@
 				0C658A901F8612AF008AEB55 /* ImageSettable.swift in Sources */,
 				0C658A8F1F8612AD008AEB55 /* TextEditable.swift in Sources */,
 				0C658A881F861293008AEB55 /* SwiftyImageView.swift in Sources */,
+				0C59CA5B1F91FF6F001DFD7F /* SwiftyTask.swift in Sources */,
 				0C658A8E1F8612AB008AEB55 /* ImageCacheable.swift in Sources */,
 				0C658A8B1F86129C008AEB55 /* SwiftyView.swift in Sources */,
 				0C658A891F861297008AEB55 /* SwiftyImage.swift in Sources */,

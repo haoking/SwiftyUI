@@ -9,7 +9,13 @@
 import UIKit
 import SwiftyUI
 
-class ViewController: UIViewController {
+struct SimpleError: Error {
+    
+}
+
+
+class ViewController: UIViewController
+{
 
     override func viewDidLoad()
     {
@@ -34,6 +40,48 @@ class ViewController: UIViewController {
         })).addTo(view)
         myBtn.frame = CGRect(x: 50, y: 450 + 20 + 20 + 20, width: 100, height: 100)
         myBtn.titleLabel.textColor = .white
+        
+        Promise.firstly(on: .background, ClosureThrowWrapper({
+            
+            for i in 1...5
+            {
+                print("Task1-------\(i)")
+            }
+            print("task1----Thread:\(Thread.current)")
+            
+        })).then(on: .main, ClosureThrowWrapper({
+            
+            for i in 1...5
+            {
+                print("Task2-------\(i)")
+            }
+            print("task2----Thread:\(Thread.current)")
+            
+        })).then(ClosureThrowWrapper({
+            
+            throw SimpleError()
+            
+        })).then(ClosureThrowWrapper({
+            
+            for i in 1...5
+            {
+                print("Task3-------\(i)")
+            }
+            print("task3----Thread:\(Thread.current)")
+            
+        })).always(ClosureThrowWrapper({
+            
+            for i in 1...5
+            {
+                print("TaskAlways-------\(i)")
+            }
+            print("taskAlways----Thread:\(Thread.current)")
+            
+        })).catch(ClosureWrapper({ (error) in
+            
+            print(String(describing: error))
+            
+        }))
     }
     
     func btnTappedSelector(_ sender: SwiftyButton)

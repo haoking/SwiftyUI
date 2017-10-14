@@ -1,4 +1,7 @@
 # SwiftyUI
+
+![Build Status](https://travis-ci.org/SwiftyUI/SwiftyUI.svg?branch=master)
+
 ![CocoaPods Compatible](https://img.shields.io/cocoapods/v/SwiftyUI.svg)  ![Platform](https://img.shields.io/cocoapods/p/SwiftyUI.svg?style=flat)
 
 High performance(100%) and lightweight(one class each UI) UIView,  UIImage, UIImageView, UIlabel, UIButton and more.
@@ -16,6 +19,8 @@ High performance(100%) and lightweight(one class each UI) UIView,  UIImage, UIIm
 - [x] UI loading thread-safe
 - [x] Block-Package to more easy to use
 - [x] Easy and simple to use, all APIs are same to system APIs
+- [x] ThreadPool auto manage threads depends on active CPUs, and autorelease Runloop inside
+- [x] Promise is a lightweight version of PromiseKit, based partially on Javascript's A+ spec, depends on ThreadPool, an interesting feature is that it can `then` on both main thread and background in one Promise.
 
 ## Requirements
 
@@ -208,6 +213,55 @@ let myBtn : SwiftyButton = SwiftyButton.load("Button", myImage, ClosureWrapper({
                                                                                 
 })).addTo(view)
 myBtn.frame = CGRect(x: 50, y: 450 + 20 + 20 + 20, width: 100, height: 100)
+```
+
+### ThreadPool
+
+ThreadPool is used to manage threads which depends on active CPUs, also autorelease Runloop inside.
+
+```swift
+let myOperation : BlockOperation = .init {
+
+    print("task2----Thread:\(Thread.current)")
+    for i in 1...3
+    {
+        print("Task-------\(i)")
+    }
+}
+
+ThreadPool.defalut.add(myOperation)
+```
+
+### Promise
+
+Everyone knows PromiseKit and its story. I also use this library in my code. But it is too heavy for my code, so I build a lightweight version of PromiseKit, based partially on Javascript's A+ spec, depends on ThreadPool.
+
+```swift
+Promise.firstly(on: .background, ClosureThrowWrapper({
+  
+    print("task1----Thread:\(Thread.current)")
+
+})).then(on: .main, ClosureThrowWrapper({
+
+    print("task2----Thread:\(Thread.current)")
+
+})).then(ClosureThrowWrapper({
+
+    throw SimpleError()
+
+})).then(ClosureThrowWrapper({
+
+    print("task3----Thread:\(Thread.current)")
+
+})).always(ClosureThrowWrapper({
+
+    print("taskAlways----Thread:\(Thread.current)")
+
+})).catch(ClosureWrapper({ (error) in
+
+    print(String(describing: error))
+
+}))
 ```
 
 ------

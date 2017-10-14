@@ -17,6 +17,15 @@ public final class ClosureWrapper<T>
     }
 }
 
+public class ClosureThrowWrapper
+{
+    public var closure: (() throws -> Void)?
+    
+    public init(_ closure: (() throws -> Void)?) {
+        self.closure = closure
+    }
+}
+
 extension NotificationCenter
 {
     private struct SwiftyAssociatedKeys {
