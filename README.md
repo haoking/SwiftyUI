@@ -213,6 +213,20 @@ let myBtn : SwiftyButton = SwiftyButton.load("Button", myImage, ClosureWrapper({
 myBtn.frame = CGRect(x: 50, y: 450 + 20 + 20 + 20, width: 100, height: 100)
 ```
 
+### SwiftyTimer
+
+SwiftyTimer is running on RunLoop.
+
+```swift
+Timer.every(1.0, ClosureWrapper({ (timer) in
+    print("Timer_every")
+})).start()
+
+Timer.after(5.0, ClosureWrapper({ (timer) in
+    print("Timer_after")
+})).start()
+```
+
 ### SwiftyThreadPool
 
 ThreadPool is used to manage threads which depends on active CPUs, also autorelease Runloop inside.

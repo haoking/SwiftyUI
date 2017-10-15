@@ -28,6 +28,7 @@
 		0C658A8F1F8612AD008AEB55 /* TextEditable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C7651681F8611370024E56B /* TextEditable.swift */; };
 		0C658A901F8612AF008AEB55 /* ImageSettable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C7651691F8611370024E56B /* ImageSettable.swift */; };
 		0C7651501F8610800024E56B /* SwiftyUI.h in Headers */ = {isa = PBXBuildFile; fileRef = 0C76514E1F8610800024E56B /* SwiftyUI.h */; settings = {ATTRIBUTES = (Public, ); }; };
+		0CA95E5F1F940C6A00E60EBF /* SwiftyTimer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CA95E5E1F940C6900E60EBF /* SwiftyTimer.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -96,6 +97,7 @@
 		0C7651671F8611370024E56B /* ImageCacheable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageCacheable.swift; sourceTree = "<group>"; };
 		0C7651681F8611370024E56B /* TextEditable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextEditable.swift; sourceTree = "<group>"; };
 		0C7651691F8611370024E56B /* ImageSettable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageSettable.swift; sourceTree = "<group>"; };
+		0CA95E5E1F940C6900E60EBF /* SwiftyTimer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwiftyTimer.swift; sourceTree = "<group>"; };
 		0CB748F41F87816E00D8FDD0 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = SOURCE_ROOT; };
 		0CB748F51F87817600D8FDD0 /* LICENSE */ = {isa = PBXFileReference; lastKnownFileType = text; path = LICENSE; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -224,6 +226,7 @@
 				0C76515F1F8611370024E56B /* SwiftyImageView.swift */,
 				0C7651631F8611370024E56B /* SwiftyLabel.swift */,
 				0C7651611F8611370024E56B /* SwiftyButton.swift */,
+				0CA95E5E1F940C6900E60EBF /* SwiftyTimer.swift */,
 				0C59CA5A1F91FF6E001DFD7F /* SwiftyThreadPool.swift */,
 				0C146FED1F9275CA001C9E11 /* SwiftyPromise.swift */,
 				0C2D75CC1F877D2D00596281 /* Protocols */,
@@ -446,6 +449,7 @@
 				0C658A8D1F8612A2008AEB55 /* SwiftyGlobal.swift in Sources */,
 				0C658A901F8612AF008AEB55 /* ImageSettable.swift in Sources */,
 				0C658A8F1F8612AD008AEB55 /* TextEditable.swift in Sources */,
+				0CA95E5F1F940C6A00E60EBF /* SwiftyTimer.swift in Sources */,
 				0C658A881F861293008AEB55 /* SwiftyImageView.swift in Sources */,
 				0C59CA5B1F91FF6F001DFD7F /* SwiftyThreadPool.swift in Sources */,
 				0C658A8E1F8612AB008AEB55 /* ImageCacheable.swift in Sources */,

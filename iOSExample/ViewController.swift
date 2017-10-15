@@ -41,6 +41,14 @@ class ViewController: UIViewController
         myBtn.frame = CGRect(x: 50, y: 450 + 20 + 20 + 20, width: 100, height: 100)
         myBtn.titleLabel.textColor = .white
         
+        Timer.every(1.0, ClosureWrapper({ (timer) in
+            print("Timer_every")
+        })).start()
+        
+        Timer.after(5.0, ClosureWrapper({ (timer) in
+            print("Timer_after")
+        })).start()
+        
         Promise.firstly(on: .background, ClosureThrowWrapper({
             
             for i in 1...5
