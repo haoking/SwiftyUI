@@ -195,6 +195,8 @@ SWIFT_MODULE_NAMESPACE_PUSH("SwiftyUI")
 
 
 
+
+
 @class NSCoder;
 
 SWIFT_CLASS("_TtC8SwiftyUI12SwiftyButton")
@@ -236,6 +238,14 @@ SWIFT_CLASS("_TtC8SwiftyUI10SwiftyView")
 - (nullable instancetype)initWithCoder:(NSCoder * _Nonnull)aDecoder OBJC_DESIGNATED_INITIALIZER;
 - (nonnull instancetype)initWithFrame:(CGRect)frame SWIFT_UNAVAILABLE;
 @end
+
+
+
+
+
+
+
+
 
 
 

@@ -16,7 +16,7 @@ Pod::Spec.new do |s|
   #
 
   s.name         = "SwiftyUI"
-  s.version      = "1.2.0"
+  s.version      = "1.3.0"
   s.summary      = "High performance and lightweight UI."
 
   # This description is used to generate tags and improve search results.

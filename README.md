@@ -2,11 +2,12 @@
 
 ![Build Status](https://travis-ci.org/haoking/SwiftyUI.svg?branch=master) ![CocoaPods Compatible](https://img.shields.io/cocoapods/v/SwiftyUI.svg) ![Platform](https://img.shields.io/cocoapods/p/SwiftyUI.svg?style=flat) ![Swift 3.0+](https://img.shields.io/badge/Swift-3.0+-orange.svg)
 
-High performance(100%) and lightweight(one class each UI) UIView,  UIImage, UIImageView, UIlabel, UIButton and more.
+High performance and lightweight UIView,  UIImage, UIImageView, UIlabel, UIButton and more.
 
 ## Features
 
 - [x] SwiftyView GPU rendering Image and Color
+- [x] SwiftyColor — color from Hex, colorRGBA value from UIColor, colors from Image
 - [x] UIImage Extensions for Inflation / Scaling / Rounding 
 - [x] Auto-Purging In-Memory Image Cache
 - [x] SwiftyImageView extension 10+ animations
@@ -87,25 +88,31 @@ view.addSubview(myView)
 myView.frame = CGRect.init(x: 50, y: 50, width: 100, height: 100)
 ```
 
-### SwiftyImage
+### SwiftyColor
 
-SwiftyImage offers kinds of extension initialize methods on UIImage , include:
+color from Hex
 
-- `name`
-- `data`
-- `image`
+colorRGBA value from UIColor
 
 ```swift
 import SwiftyUI
 
-let myImage : UIImage? = UIImage.load("aImage") //Image name from Assets
-
-let myImage : UIImage? = UIImage.load(imageData) //Image data
-
-let myImage : UIImage? = UIImage.load(aImage, identifier: "aImageTdentifier") //Image obj
+let myColor: UIColor = .hex(0xccff00) // .hex("333399")
+let redFloat: CGFloat = myColor.redValue //greenValue, blueValue, alphaValue
 ```
 
-UIImage init from `load(..)` methods will have a auto Image cach, Also the image cache pool will auto manage depends on cpu and iOS system memory.
+colors from Image, also return block is on main thread:
+
+```swift
+import SwiftyUI
+
+myImage?.colors({ (background, primary, secondary, detail) in
+    print("background color: \(background)")
+    print("primary color: \(primary)")
+    print("secondary color: \(secondary)")
+    print("detail color: \(detail)")
+})
+```
 
 ### UIImage Extensions
 
@@ -248,32 +255,50 @@ ThreadPool.defalut.add(myOperation)
 
 Everyone knows PromiseKit and its story. I also use this library in my code. But it is too heavy for my code, so I build a lightweight version of PromiseKit, based partially on Javascript's A+ spec, depends on ThreadPool.
 
+If you dont need send value from different threads in a Premise, it will be simple:
+
 ```swift
-Promise.firstly(on: .background, ClosureThrowWrapper({
-  
+Promise<Void>.firstly(with: nil, on: .background) {
+
+    print("Promise<Void>---task1----Thread:\(Thread.current)")
+
+    }.then(on: .main) {
+
+        print("Promise<Void>---task2----Thread:\(Thread.current)")
+        throw SimpleError()
+
+    }.then {
+
+        print("Promise<Void>---task3----Thread:\(Thread.current)")
+    }.always {
+
+        print("Promise<Void>---taskAlways----Thread:\(Thread.current)")
+
+    }.catch { (error) in
+
+        print("Promise<Void>---error\(String(describing: error))")
+}
+```
+
+Also you need to share or send value in different threads in a Promise, you should code as below:
+
+```swift
+Promise<String>.firstly(on: .background) { (update, _) in
+
     print("task1----Thread:\(Thread.current)")
+    update("abc")
 
-})).then(on: .main, ClosureThrowWrapper({
+    }.then { (update, str) in
 
-    print("task2----Thread:\(Thread.current)")
+        print("thenthenthenthenthenthen----\(String(describing: str))") // abc
+        var str = str
+        str?.append("aaaaaaaa") // aaaaaaaaabc
+        update(str)
 
-})).then(ClosureThrowWrapper({
+    }.then(with: nil, on: .main) { (_, str) in
 
-    throw SimpleError()
-
-})).then(ClosureThrowWrapper({
-
-    print("task3----Thread:\(Thread.current)")
-
-})).always(ClosureThrowWrapper({
-
-    print("taskAlways----Thread:\(Thread.current)")
-
-})).catch(ClosureWrapper({ (error) in
-
-    print(String(describing: error))
-
-}))
+        print("mainmainmainmainmainmainmain----\(String(describing: str))") // aaaaaaaaabc
+    }.catch()
 ```
 
 ------

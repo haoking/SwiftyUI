@@ -49,47 +49,52 @@ class ViewController: UIViewController
             print("Timer_after")
         })).start()
         
-        Promise.firstly(on: .background, ClosureThrowWrapper({
+        myImage?.colors({ (background, primary, secondary, detail) in
+            print("background color: \(background)")
+            print("primary color: \(primary)")
+            print("secondary color: \(secondary)")
+            print("detail color: \(detail)")
+        })
+        
+        print("Main Thread:\(Thread.main)")
+        
+        Promise<String>.firstly(on: .background) { (update, _) in
             
-            for i in 1...5
-            {
-                print("Task1-------\(i)")
-            }
             print("task1----Thread:\(Thread.current)")
+            update("abc")
             
-        })).then(on: .main, ClosureThrowWrapper({
+            }.then { (update, str) in
+                
+                print("thenthenthenthenthenthen----\(String(describing: str))")
+                var str = str
+                str?.append("aaaaaaaa")
+                update(str)
+                
+            }.then(with: nil, on: .main) { (_, str) in
+                
+                print("mainmainmainmainmainmainmain----\(String(describing: str))")
+            }.catch()
+        
+        Promise<Void>.firstly(with: nil, on: .background) {
             
-            for i in 1...5
-            {
-                print("Task2-------\(i)")
-            }
-            print("task2----Thread:\(Thread.current)")
+            print("Promise<Void>---task1----Thread:\(Thread.current)")
             
-        })).then(ClosureThrowWrapper({
-            
-            throw SimpleError()
-            
-        })).then(ClosureThrowWrapper({
-            
-            for i in 1...5
-            {
-                print("Task3-------\(i)")
-            }
-            print("task3----Thread:\(Thread.current)")
-            
-        })).always(ClosureThrowWrapper({
-            
-            for i in 1...5
-            {
-                print("TaskAlways-------\(i)")
-            }
-            print("taskAlways----Thread:\(Thread.current)")
-            
-        })).catch(ClosureWrapper({ (error) in
-            
-            print(String(describing: error))
-            
-        }))
+            }.then(on: .main) {
+                
+                print("Promise<Void>---task2----Thread:\(Thread.current)")
+                throw SimpleError()
+                
+            }.then {
+
+                print("Promise<Void>---task3----Thread:\(Thread.current)")
+            }.always {
+                
+                print("Promise<Void>---taskAlways----Thread:\(Thread.current)")
+                
+            }.catch { (error) in
+                
+                print("Promise<Void>---error\(String(describing: error))")
+        }
     }
     
     func btnTappedSelector(_ sender: SwiftyButton)

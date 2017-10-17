@@ -27,6 +27,7 @@
 		0C658A8E1F8612AB008AEB55 /* ImageCacheable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C7651671F8611370024E56B /* ImageCacheable.swift */; };
 		0C658A8F1F8612AD008AEB55 /* TextEditable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C7651681F8611370024E56B /* TextEditable.swift */; };
 		0C658A901F8612AF008AEB55 /* ImageSettable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C7651691F8611370024E56B /* ImageSettable.swift */; };
+		0C7103621F95B1610026C84D /* SwiftyColor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C7103611F95B1600026C84D /* SwiftyColor.swift */; };
 		0C7651501F8610800024E56B /* SwiftyUI.h in Headers */ = {isa = PBXBuildFile; fileRef = 0C76514E1F8610800024E56B /* SwiftyUI.h */; settings = {ATTRIBUTES = (Public, ); }; };
 		0CA95E5F1F940C6A00E60EBF /* SwiftyTimer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CA95E5E1F940C6900E60EBF /* SwiftyTimer.swift */; };
 /* End PBXBuildFile section */
@@ -85,6 +86,7 @@
 		0C2D75F61F877D9900596281 /* iOSExampleUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSExampleUITests.swift; sourceTree = "<group>"; };
 		0C2D75F81F877D9900596281 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		0C59CA5A1F91FF6E001DFD7F /* SwiftyThreadPool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwiftyThreadPool.swift; sourceTree = "<group>"; };
+		0C7103611F95B1600026C84D /* SwiftyColor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwiftyColor.swift; sourceTree = "<group>"; };
 		0C76514B1F8610800024E56B /* SwiftyUI.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = SwiftyUI.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		0C76514E1F8610800024E56B /* SwiftyUI.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = SwiftyUI.h; sourceTree = "<group>"; };
 		0C76514F1F8610800024E56B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -221,6 +223,7 @@
 			isa = PBXGroup;
 			children = (
 				0C7651641F8611370024E56B /* SwiftyGlobal.swift */,
+				0C7103611F95B1600026C84D /* SwiftyColor.swift */,
 				0C7651601F8611370024E56B /* SwiftyImage.swift */,
 				0C7651621F8611370024E56B /* SwiftyView.swift */,
 				0C76515F1F8611370024E56B /* SwiftyImageView.swift */,
@@ -453,6 +456,7 @@
 				0C658A881F861293008AEB55 /* SwiftyImageView.swift in Sources */,
 				0C59CA5B1F91FF6F001DFD7F /* SwiftyThreadPool.swift in Sources */,
 				0C658A8E1F8612AB008AEB55 /* ImageCacheable.swift in Sources */,
+				0C7103621F95B1610026C84D /* SwiftyColor.swift in Sources */,
 				0C658A8B1F86129C008AEB55 /* SwiftyView.swift in Sources */,
 				0C658A891F861297008AEB55 /* SwiftyImage.swift in Sources */,
 				0C658A8C1F86129E008AEB55 /* SwiftyLabel.swift in Sources */,

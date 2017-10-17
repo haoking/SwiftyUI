@@ -103,7 +103,6 @@ extension NSLock
 
 extension NSObject
 {
-    
     public final class func swizzleInstance(_ originalSelector: Selector, _ swizzledSelector: Selector)
     {
         guard let originalMethod = class_getInstanceMethod(self, originalSelector), let swizzledMethod = class_getInstanceMethod(self, swizzledSelector) else { return }
@@ -134,12 +133,3 @@ extension NSObject
         }
     }
 }
-
-extension UIColor
-{
-    public final var redValue: CGFloat { return CIColor(color: self).red }
-    public final var greenValue: CGFloat { return CIColor(color: self).green }
-    public final var blueValue: CGFloat { return CIColor(color: self).blue }
-    public final var alphaValue: CGFloat { return CIColor(color: self).alpha }
-}
-

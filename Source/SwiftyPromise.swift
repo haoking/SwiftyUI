@@ -15,9 +15,9 @@ public enum ThreadPerform: Int {
 
 private struct Task
 {
-    fileprivate var identifier: String?
-    fileprivate var perform: ThreadPerform
-    fileprivate var op : Operation
+    var identifier: String?
+    var perform: ThreadPerform
+    var op : Operation
     
     private init(_ identifier : String? = nil, _ perform: ThreadPerform = .background, _ op: Operation)
     {
@@ -26,12 +26,12 @@ private struct Task
         self.op = op
     }
     
-    fileprivate static func create(_ identifier : String? = nil, _ perform: ThreadPerform = .background, _ op: Operation) -> Task
+    static func create(_ identifier : String? = nil, _ perform: ThreadPerform = .background, _ op: Operation) -> Task
     {
         return Task(identifier, perform, op)
     }
     
-    fileprivate func start()
+    func start()
     {
         switch perform {
         case .main:
@@ -42,66 +42,104 @@ private struct Task
     }
 }
 
-public class Promise
+private extension Operation
+{
+    func complete(with block: (() -> Void)?) -> Operation
+    {
+        completionBlock = block
+        return self
+    }
+}
+
+public final class Promise<T>
 {
     private var tasks: [Task] = []
     private var alwaysTasks: [Task] = []
-    private var errorWrapper : ClosureWrapper<Error>?
+    private var errorBlock : ((Error) -> Void)?
     private var isError : Bool = false
     
-    private final func operationBuild(_ wrapper: ClosureThrowWrapper) -> Operation
+    private var value: T?
+    
+    private final func operationBuild(_ work: (() throws -> Void)?) -> Operation
     {
-        var wrapper : ClosureThrowWrapper = wrapper
-        if wrapper.closure == nil
-        {
-            wrapper = ClosureThrowWrapper({ })
-        }
-        let handler = wrapper.closure!
-        
-        let op : BlockOperation = BlockOperation.init(block: {
+        return BlockOperation {
+            var work = work
+            if work == nil { work = {} }
             do {
-                try handler()
+                try work!()
             }
             catch let error {
                 self.isError = true
-                self.errorWrapper?.closure!(error)
+                self.errorBlock?(error)
             }
-        })
-        op.completionBlock = { [weak self] in
-            guard let strongSelf = self else { return }
-            strongSelf.fire()
-        }
-        return op
+            }.complete(with: { [weak self] in
+                guard let strongSelf = self else { return }
+                strongSelf.fire()
+            })
     }
     
-    private init(_ identifier : String? = nil, _ perform: ThreadPerform = .background, _ wrapper: ClosureThrowWrapper)
+    private final func operationBuildT(_ work: @escaping (_ update: (T?) -> (), _ value: T?) throws -> ()) -> Operation
     {
-        tasks.append(.create(identifier, perform, operationBuild(wrapper)))
+        return BlockOperation {
+            do {
+                try work(self.update, self.value)
+            }
+            catch let error {
+                self.isError = true
+                self.errorBlock?(error)
+            }
+            }.complete(with: { [weak self] in
+                guard let strongSelf = self else { return }
+                strongSelf.fire()
+            })
+    }
+    
+    private init(_ identifier : String? = nil, _ perform: ThreadPerform = .background, _ work: (() throws -> Void)?)
+    {
+        tasks.append(.create(identifier, perform, operationBuild(work)))
+    }
+    
+    private init(_ identifier : String? = nil, _ perform: ThreadPerform = .background, work: @escaping (_ update: (T?) -> Void, _ value: T?) throws -> Void)
+    {
+        tasks.append(.create(identifier, perform, operationBuildT(work)))
     }
     
     @discardableResult
-    public final class func firstly(with identifier : String? = nil, on perform: ThreadPerform = .background, _ wrapper: ClosureThrowWrapper) -> Promise
+    public final class func firstly(with identifier : String? = nil, on perform: ThreadPerform = .background, _ work: (() throws -> Void)?) -> Promise
     {
-        return Promise(identifier, perform, wrapper)
+        return Promise(identifier, perform, work)
     }
     
-    public final func then(with identifier : String? = nil, on perform: ThreadPerform = .background, _ wrapper: ClosureThrowWrapper) -> Promise
+    @discardableResult
+    public final class func firstly(with identifier : String? = nil, on perform: ThreadPerform = .background, work: @escaping (_ update: (T?) -> Void, _ value: T?) throws -> Void) -> Promise
     {
-        tasks.append(.create(identifier, perform, operationBuild(wrapper)))
+        return Promise(identifier, perform, work: work)
+    }
+    
+    @discardableResult
+    public final func then(with identifier : String? = nil, on perform: ThreadPerform = .background, _ work: (() throws -> Void)?) -> Promise
+    {
+        tasks.append(.create(identifier, perform, operationBuild(work)))
         return self
     }
     
-    public final func always(with identifier : String? = nil, on perform: ThreadPerform = .background, _ wrapper: ClosureThrowWrapper) -> Promise
+    public final func then(with identifier : String? = nil, on perform: ThreadPerform = .background, work: @escaping (_ update: (T?) -> (), _ value: T?) throws -> Void) -> Promise
     {
-        let task : Task = .create(identifier, perform, operationBuild(wrapper))
+        tasks.append(.create(identifier, perform, operationBuildT(work)))
+        return self
+    }
+    
+    public final func always(with identifier : String? = nil, on perform: ThreadPerform = .background, _ work: (() throws -> Void)?) -> Promise
+    {
+        let task : Task = .create(identifier, perform, operationBuild(work))
         task.op.completionBlock = nil
         alwaysTasks.append(task)
         return self
     }
     
-    public final func `catch`(_ errorWrapper : ClosureWrapper<Error>? = nil)
+    public final func `catch`(_ errorBlock : ((Error) -> Void)? = nil)
     {
-        self.errorWrapper = errorWrapper
+        self.errorBlock = errorBlock
         for (_, task) in alwaysTasks.enumerated().reversed()
         {
             task.start()
@@ -110,15 +148,20 @@ public class Promise
         fire()
     }
     
+    private final func update(_ value: T?)
+    {
+        self.value = value
+    }
+    
     private final func fire()
     {
         guard isError == false else {
             tasks.removeAll()
             return
         }
-        
         guard let task = tasks.first else { return }
         task.start()
         tasks.removeFirst()
     }
 }
+
