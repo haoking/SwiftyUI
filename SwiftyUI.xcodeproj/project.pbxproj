@@ -7,7 +7,6 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		0C146FEE1F9275CA001C9E11 /* SwiftyPromise.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C146FED1F9275CA001C9E11 /* SwiftyPromise.swift */; };
 		0C2D75D71F877D9900596281 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C2D75D61F877D9900596281 /* AppDelegate.swift */; };
 		0C2D75D91F877D9900596281 /* ViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C2D75D81F877D9900596281 /* ViewController.swift */; };
 		0C2D75DC1F877D9900596281 /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 0C2D75DA1F877D9900596281 /* Main.storyboard */; };
@@ -30,6 +29,8 @@
 		0C7103621F95B1610026C84D /* SwiftyColor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C7103611F95B1600026C84D /* SwiftyColor.swift */; };
 		0C7651501F8610800024E56B /* SwiftyUI.h in Headers */ = {isa = PBXBuildFile; fileRef = 0C76514E1F8610800024E56B /* SwiftyUI.h */; settings = {ATTRIBUTES = (Public, ); }; };
 		0CA95E5F1F940C6A00E60EBF /* SwiftyTimer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CA95E5E1F940C6900E60EBF /* SwiftyTimer.swift */; };
+		0CC0FEA71F97CF7900808344 /* SwiftyToast.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CC0FEA61F97CF7900808344 /* SwiftyToast.swift */; };
+		0CC0FEA91F97EA7500808344 /* SwiftyPromise.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CC0FEA81F97EA7500808344 /* SwiftyPromise.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -71,7 +72,6 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		0C146FED1F9275CA001C9E11 /* SwiftyPromise.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwiftyPromise.swift; sourceTree = "<group>"; };
 		0C2D75D41F877D9900596281 /* iOSExample.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = iOSExample.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		0C2D75D61F877D9900596281 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		0C2D75D81F877D9900596281 /* ViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewController.swift; sourceTree = "<group>"; };
@@ -102,6 +102,8 @@
 		0CA95E5E1F940C6900E60EBF /* SwiftyTimer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwiftyTimer.swift; sourceTree = "<group>"; };
 		0CB748F41F87816E00D8FDD0 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = SOURCE_ROOT; };
 		0CB748F51F87817600D8FDD0 /* LICENSE */ = {isa = PBXFileReference; lastKnownFileType = text; path = LICENSE; sourceTree = "<group>"; };
+		0CC0FEA61F97CF7900808344 /* SwiftyToast.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwiftyToast.swift; sourceTree = "<group>"; };
+		0CC0FEA81F97EA7500808344 /* SwiftyPromise.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwiftyPromise.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -230,8 +232,9 @@
 				0C7651631F8611370024E56B /* SwiftyLabel.swift */,
 				0C7651611F8611370024E56B /* SwiftyButton.swift */,
 				0CA95E5E1F940C6900E60EBF /* SwiftyTimer.swift */,
+				0CC0FEA81F97EA7500808344 /* SwiftyPromise.swift */,
 				0C59CA5A1F91FF6E001DFD7F /* SwiftyThreadPool.swift */,
-				0C146FED1F9275CA001C9E11 /* SwiftyPromise.swift */,
+				0CC0FEA61F97CF7900808344 /* SwiftyToast.swift */,
 				0C2D75CC1F877D2D00596281 /* Protocols */,
 				0C658A831F8611C3008AEB55 /* Supporting Files */,
 			);
@@ -450,18 +453,19 @@
 			buildActionMask = 2147483647;
 			files = (
 				0C658A8D1F8612A2008AEB55 /* SwiftyGlobal.swift in Sources */,
+				0CC0FEA71F97CF7900808344 /* SwiftyToast.swift in Sources */,
 				0C658A901F8612AF008AEB55 /* ImageSettable.swift in Sources */,
 				0C658A8F1F8612AD008AEB55 /* TextEditable.swift in Sources */,
 				0CA95E5F1F940C6A00E60EBF /* SwiftyTimer.swift in Sources */,
 				0C658A881F861293008AEB55 /* SwiftyImageView.swift in Sources */,
 				0C59CA5B1F91FF6F001DFD7F /* SwiftyThreadPool.swift in Sources */,
+				0CC0FEA91F97EA7500808344 /* SwiftyPromise.swift in Sources */,
 				0C658A8E1F8612AB008AEB55 /* ImageCacheable.swift in Sources */,
 				0C7103621F95B1610026C84D /* SwiftyColor.swift in Sources */,
 				0C658A8B1F86129C008AEB55 /* SwiftyView.swift in Sources */,
 				0C658A891F861297008AEB55 /* SwiftyImage.swift in Sources */,
 				0C658A8C1F86129E008AEB55 /* SwiftyLabel.swift in Sources */,
 				0C658A8A1F861299008AEB55 /* SwiftyButton.swift in Sources */,
-				0C146FEE1F9275CA001C9E11 /* SwiftyPromise.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

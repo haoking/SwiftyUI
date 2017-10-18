@@ -101,7 +101,7 @@ public extension UIColor
     }
 }
 
-extension UIImage
+public extension UIImage
 {
     public final func colors(_ complete: ((_ background: UIColor, _ primary: UIColor, _ secondary: UIColor, _ detail: UIColor) -> Void)?)
     {
@@ -246,7 +246,7 @@ extension UIImage
     }
 }
 
-extension UIColor
+public extension UIColor
 {
     public final class var infoSystem: UIColor { get { return .load(R: 47.0, G: 112.0, B: 225.0) } }
     public final class var successSystem: UIColor { get { return .load(R: 83.0, G: 215.0, B: 106.0) } }

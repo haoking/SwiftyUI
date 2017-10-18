@@ -41,7 +41,7 @@ public class SwiftyButton: UIControl, ImageSettable
     }
 }
 
-extension SwiftyButton
+private extension SwiftyButton
 {
     private struct SwiftyAssociatedKeys {
         fileprivate static var tapHandlerKey : UnsafeRawPointer = UnsafeRawPointer(UnsafeMutablePointer<UInt8>.allocate(capacity: 1))
@@ -58,7 +58,7 @@ extension SwiftyButton
         }
     }
     
-    fileprivate final func addHandler(_ handler: ClosureWrapper<SwiftyButton>)
+    private final func addHandler(_ handler: ClosureWrapper<SwiftyButton>)
     {
         tapHandlerWrapper = handler
         self.addTarget(self, action: #selector(btnTapped(_:)), for: .touchUpInside)
@@ -84,7 +84,7 @@ extension SwiftyButton
     }
 }
 
-extension UIControl
+fileprivate extension UIControl
 {
     private struct SwiftyAssociatedKeys {
         fileprivate static var isIgnoreEventKey : UnsafeRawPointer = UnsafeRawPointer(UnsafeMutablePointer<UInt8>.allocate(capacity: 1))

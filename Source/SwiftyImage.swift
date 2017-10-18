@@ -9,7 +9,7 @@
 //import CoreGraphics
 import UIKit
 
-extension UIImage
+public extension UIImage
 {
     public final class func load(_ data: Data) -> UIImage?
     {
@@ -64,7 +64,7 @@ extension UIImage
     }
 }
 
-extension UIImage
+public extension UIImage
 {
     private struct AssociatedKey {
         fileprivate static var isInflatedKey : UnsafeRawPointer = UnsafeRawPointer(UnsafeMutablePointer<UInt8>.allocate(capacity: 1))
@@ -84,7 +84,7 @@ extension UIImage
         }
     }
     
-    public func inflate()
+    public final func inflate()
     {
         guard isInflated == false else { return }
         isInflated = true
@@ -98,7 +98,7 @@ extension UIImage
         return !(alphaInfo == .first || alphaInfo == .last || alphaInfo == .premultipliedFirst || alphaInfo == .premultipliedLast)
     }
 
-    public func reSize(to size: CGSize) -> UIImage
+    public final func reSize(to size: CGSize) -> UIImage
     {
         guard size.width > 0 && size.height > 0 else { return self }
         
@@ -110,7 +110,7 @@ extension UIImage
         return scaledImage
     }
     
-    public func reSize(toFit size: CGSize) -> UIImage
+    public final func reSize(toFit size: CGSize) -> UIImage
     {
         guard size.width > 0 && size.height > 0 else { return self }
         
@@ -136,7 +136,7 @@ extension UIImage
         return scaledImage
     }
     
-    public func reSize(toFill size: CGSize) -> UIImage
+    public final func reSize(toFill size: CGSize) -> UIImage
     {
         guard size.width > 0 && size.height > 0 else { return self }
 
@@ -162,7 +162,7 @@ extension UIImage
         return scaledImage
     }
     
-    public func rounded(withCornerRadius radius: CGFloat, divideRadiusByImageScale: Bool = false) -> UIImage
+    public final func rounded(withCornerRadius radius: CGFloat, divideRadiusByImageScale: Bool = false) -> UIImage
     {
         UIGraphicsBeginImageContextWithOptions(size, false, 0.0)
         
@@ -179,7 +179,7 @@ extension UIImage
         return roundedImage
     }
     
-    public func roundedIntoCircle() -> UIImage
+    public final func roundedIntoCircle() -> UIImage
     {
         let radius = min(size.width, size.height) / 2.0
         var squareImage = self
@@ -202,9 +202,9 @@ extension UIImage
 }
 
     
-final class ImageCachePool: ImageCacheable
+public final class ImageCachePool: ImageCacheable
 {
-    open static let defalut: ImageCachePool = {
+    open static let `defalut`: ImageCachePool = {
         return ImageCachePool()
     }()
     

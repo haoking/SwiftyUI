@@ -8,9 +8,9 @@
 
 import Foundation
 
-public class SwiftyThreadPool
+public final class SwiftyThreadPool
 {
-    private final var MAX_THREAD_COUNT : Int {
+    private var MAX_THREAD_COUNT : Int {
         get {
             var activecpu : UInt32 = 0
             var size = MemoryLayout<UInt32>.size
@@ -25,7 +25,7 @@ public class SwiftyThreadPool
         return SwiftyThreadPool()
     }()
     
-    private final var queue : OperationQueue?
+    private var queue : OperationQueue?
     private init()
     {
         let queue : OperationQueue = OperationQueue()
@@ -39,8 +39,7 @@ public class SwiftyThreadPool
         }))
     }
     
-    
-    private final func prepareEnvironment() -> BlockOperation
+    private func prepareEnvironment() -> BlockOperation
     {
         let environmentOperation : BlockOperation = BlockOperation.init {
             
@@ -58,7 +57,7 @@ public class SwiftyThreadPool
         return environmentOperation
     }
     
-    public final func add(_ op: Operation, withIdentifier identifier: String? = nil)
+    public func add(_ op: Operation, withIdentifier identifier: String? = nil)
     {
         guard let queue = queue else { return }
         op.name = identifier
@@ -67,7 +66,7 @@ public class SwiftyThreadPool
     }
     
     @discardableResult
-    public final func remove(withIdentifier identifier: String) -> Bool
+    public func remove(withIdentifier identifier: String) -> Bool
     {
         var removed = false
         guard let queue = queue else { return removed }
@@ -85,7 +84,7 @@ public class SwiftyThreadPool
     }
     
     @discardableResult
-    public final func removeAll() -> Bool
+    public func removeAll() -> Bool
     {
         var removed = false
         guard let queue = queue else { return removed }
@@ -101,7 +100,7 @@ public class SwiftyThreadPool
         return removed
     }
     
-    public final func operation(withIdentifier identifier: String) -> Operation?
+    public func operation(withIdentifier identifier: String) -> Operation?
     {
         var tagOp: Operation?
         guard let queue = queue else { return tagOp }
@@ -116,26 +115,26 @@ public class SwiftyThreadPool
         return tagOp
     }
     
-    public final var count : Int {
+    public var count : Int {
         get {
             guard let queue = queue else { return 0 }
             return queue.operationCount
         }
     }
     
-    public final func stop()
+    public func stop()
     {
         guard let queue = queue else { return }
         queue.isSuspended = false
     }
     
-    public final func restart()
+    public func restart()
     {
         guard let queue = queue else { return }
         queue.isSuspended = true
     }
     
-    public final func cancel()
+    public func cancel()
     {
         removeAll()
         queue = nil

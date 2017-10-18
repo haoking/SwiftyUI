@@ -28,7 +28,7 @@ public class SwiftyView : UIView
     }
 }
 
-extension UIView
+public extension UIView
 {
     @discardableResult
     public final func addTo( _ view: UIView) -> Self
@@ -63,7 +63,7 @@ extension UIView
         updateOpaque()
     }
     
-    open func updateOpaque()
+    public final func updateOpaque()
     {
         if let color = backgroundColor, color.alphaValue == 1.0, alpha == 1.0
         {

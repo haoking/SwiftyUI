@@ -14,6 +14,7 @@ High performance and lightweight UIView,  UIImage, UIImageView, UIlabel, UIButto
 - [x] SwiftyImageView 150% High performance more than UIImageView, depending on UIView-package, Image-GPU and Image-Cache
 - [x] SwiftyLabel 300% High performance more than UIlabel, depending on UIView-package and TextKit
 - [x] SwiftyButton 300% High performance more than UIButton, depending on UIControl-package, TextKit and BackgroundImage-Advanced
+- [x] SwiftyToast is depend on globalCenter and show the toast without overlap.
 - [x] lightweight, almost one class for each UI
 - [x] UI loading thread-safe
 - [x] Block-Package to more easy to use
@@ -232,6 +233,14 @@ Timer.every(1.0, ClosureWrapper({ (timer) in
 Timer.after(5.0, ClosureWrapper({ (timer) in
     print("Timer_after")
 })).start()
+```
+
+### SwiftyToast
+
+SwiftyToas  is depend on global runloop cente, also show the toast without overlap.
+
+```swift
+SwiftyToast.load("This is a Toast")
 ```
 
 ### SwiftyThreadPool

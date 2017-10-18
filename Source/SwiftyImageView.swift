@@ -34,7 +34,7 @@ public class SwiftyImageView: UIView, ImageSettable
     }
 }
 
-extension SwiftyImageView
+public extension SwiftyImageView
 {
     public enum ImageTransition
     {
@@ -122,7 +122,7 @@ extension SwiftyImageView
         }
     }
     
-    public func transition(_ imageTransition: ImageTransition, with image: UIImage)
+    public final func transition(_ imageTransition: ImageTransition, with image: UIImage)
     {
         UIView.transition(with: self, duration: imageTransition.duration, options: imageTransition.animationOptions, animations: { imageTransition.animations(self, image) }, completion: imageTransition.completion)
     }

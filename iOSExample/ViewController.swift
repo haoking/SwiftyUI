@@ -59,21 +59,22 @@ class ViewController: UIViewController
         print("Main Thread:\(Thread.main)")
         
         Promise<String>.firstly(on: .background) { (update, _) in
-            
+
             print("task1----Thread:\(Thread.current)")
             update("abc")
-            
+
             }.then { (update, str) in
-                
+
                 print("thenthenthenthenthenthen----\(String(describing: str))")
                 var str = str
                 str?.append("aaaaaaaa")
                 update(str)
-                
+
             }.then(with: nil, on: .main) { (_, str) in
-                
+
                 print("mainmainmainmainmainmainmain----\(String(describing: str))")
             }.catch()
+        
         
         Promise<Void>.firstly(with: nil, on: .background) {
             
@@ -99,7 +100,7 @@ class ViewController: UIViewController
     
     func btnTappedSelector(_ sender: SwiftyButton)
     {
-        print("btnTappedSelector")
+        SwiftyToast.load("btnTappedSelector")
     }
 }
 
