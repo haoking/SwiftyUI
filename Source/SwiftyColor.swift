@@ -16,27 +16,27 @@ public extension UIColor
         return UIColor(red: R / divisor, green: G / divisor, blue: B / divisor, alpha: A)
     }
     
-    public final class func hex(_ hex: UInt32, with alpha: CGFloat = 1.0) -> UIColor
+    public final class func hex(_ hex: UInt, with alpha: CGFloat = 1.0) -> UIColor
     {
         let mask : Int = 0xFF
         let r : CGFloat = CGFloat(Int(hex >> 16) & mask)
         let g : CGFloat = CGFloat(Int(hex >> 8 ) & mask)
         let b : CGFloat = CGFloat(Int(hex      ) & mask)
-        return UIColor.load(R:r, G:g, B:b, A:alpha)
+        return .load(R:r, G:g, B:b, A:alpha)
     }
     
     public final class func hex(_ hexString: String, with alpha: CGFloat = 1.0) -> UIColor
     {
-        var hex : String = hexString.hasPrefix("#") ? String(hexString.characters.dropFirst()) : hexString
-        guard hex.characters.count == 3 || hex.characters.count == 6 else { return UIColor(white: 1.0, alpha: 0.0) }
-        if hex.characters.count == 3
+        var hex : String = hexString.hasPrefix("#") ? String(hexString.dropFirst()) : hexString
+        guard hex.count == 3 || hex.count == 6 else { return UIColor(white: 1.0, alpha: 0.0) }
+        if hex.count == 3
         {
-            for (index, char) in hex.characters.enumerated()
+            for (index, char) in hex.enumerated()
             {
                 hex.insert(char, at: hex.index(hex.startIndex, offsetBy: index * 2))
             }
         }
-        return UIColor.hex(UInt32(hex, radix: 16)!, with: alpha)
+        return .hex(UInt(hex, radix: 16)!, with: alpha)
     }
 }
 

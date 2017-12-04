@@ -210,7 +210,7 @@ public final class ImageCachePool: ImageCacheable
     
     private init()
     {
-        NotificationCenter.default.addObserver(self, name: Notification.Name.UIApplicationDidReceiveMemoryWarning, object: nil, selector: ClosureWrapper({ [weak self] (_) in
+        NotificationCenter.default.addObserver(Notification.Name.UIApplicationDidReceiveMemoryWarning, object: nil, selector: ClosureWrapper({ [weak self] (_) in
             
             guard let strongSelf = self else { return }
             strongSelf.removeAllImages()

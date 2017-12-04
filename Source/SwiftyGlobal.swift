@@ -91,28 +91,28 @@ public final class ClosureWrapper<T>
 
 extension NotificationCenter
 {
-    private struct SwiftyAssociatedKeys {
+    private struct SwiftyNotificationCenterAssociatedKeys {
         fileprivate static var selectorBlockKey : UnsafeRawPointer = UnsafeRawPointer(UnsafeMutablePointer<UInt8>.allocate(capacity: 1))
     }
     
-    private final var selectorWrapper : ClosureWrapper<NotificationCenter>? {
+    private final var selectorWrapper : ClosureWrapper<Notification>? {
         get {
-            guard let wrapper = objc_getAssociatedObject(self, SwiftyAssociatedKeys.selectorBlockKey) as? ClosureWrapper<NotificationCenter> else { return nil }
+            guard let wrapper = objc_getAssociatedObject(self, SwiftyNotificationCenterAssociatedKeys.selectorBlockKey) as? ClosureWrapper<Notification> else { return nil }
             return wrapper
         }
         set {
-            objc_setAssociatedObject(self, SwiftyAssociatedKeys.selectorBlockKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+            objc_setAssociatedObject(self, SwiftyNotificationCenterAssociatedKeys.selectorBlockKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
         }
     }
     
-    public final func addObserver(_ observer: Any, name aName: NSNotification.Name?, object anObject: Any?, selector handler: ClosureWrapper<NotificationCenter>)
+    public func addObserver(_ aName: NSNotification.Name?, object anObject: Any?, selector handler: ClosureWrapper<Notification>)
     {
-        self.addObserver(observer, selector: #selector(selectorBlockFunc(_:)), name: aName, object: anObject)
+        addObserver(self, selector: #selector(selectorBlockFunc(_:)), name: aName, object: anObject)
         selectorWrapper = handler
     }
     
     @objc
-    private final func selectorBlockFunc(_ sender: NotificationCenter)
+    private final func selectorBlockFunc(_ sender: Notification)
     {
         if let handler = selectorWrapper?.closure
         {

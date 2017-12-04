@@ -16,6 +16,7 @@
 		0C2D75F71F877D9900596281 /* iOSExampleUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C2D75F61F877D9900596281 /* iOSExampleUITests.swift */; };
 		0C2D76021F877DF100596281 /* SwiftyUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0C76514B1F8610800024E56B /* SwiftyUI.framework */; };
 		0C2D76031F877DF100596281 /* SwiftyUI.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 0C76514B1F8610800024E56B /* SwiftyUI.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		0C51C99A1FD5F03100D1C1A3 /* SwiftyAlert.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C51C9991FD5F03100D1C1A3 /* SwiftyAlert.swift */; };
 		0C59CA5B1F91FF6F001DFD7F /* SwiftyThreadPool.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C59CA5A1F91FF6E001DFD7F /* SwiftyThreadPool.swift */; };
 		0C658A881F861293008AEB55 /* SwiftyImageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C76515F1F8611370024E56B /* SwiftyImageView.swift */; };
 		0C658A891F861297008AEB55 /* SwiftyImage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C7651601F8611370024E56B /* SwiftyImage.swift */; };
@@ -85,6 +86,7 @@
 		0C2D75F21F877D9900596281 /* iOSExampleUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = iOSExampleUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		0C2D75F61F877D9900596281 /* iOSExampleUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSExampleUITests.swift; sourceTree = "<group>"; };
 		0C2D75F81F877D9900596281 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		0C51C9991FD5F03100D1C1A3 /* SwiftyAlert.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SwiftyAlert.swift; sourceTree = "<group>"; };
 		0C59CA5A1F91FF6E001DFD7F /* SwiftyThreadPool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwiftyThreadPool.swift; sourceTree = "<group>"; };
 		0C7103611F95B1600026C84D /* SwiftyColor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwiftyColor.swift; sourceTree = "<group>"; };
 		0C76514B1F8610800024E56B /* SwiftyUI.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = SwiftyUI.framework; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -235,6 +237,7 @@
 				0CC0FEA81F97EA7500808344 /* SwiftyPromise.swift */,
 				0C59CA5A1F91FF6E001DFD7F /* SwiftyThreadPool.swift */,
 				0CC0FEA61F97CF7900808344 /* SwiftyToast.swift */,
+				0C51C9991FD5F03100D1C1A3 /* SwiftyAlert.swift */,
 				0C2D75CC1F877D2D00596281 /* Protocols */,
 				0C658A831F8611C3008AEB55 /* Supporting Files */,
 			);
@@ -461,6 +464,7 @@
 				0C59CA5B1F91FF6F001DFD7F /* SwiftyThreadPool.swift in Sources */,
 				0CC0FEA91F97EA7500808344 /* SwiftyPromise.swift in Sources */,
 				0C658A8E1F8612AB008AEB55 /* ImageCacheable.swift in Sources */,
+				0C51C99A1FD5F03100D1C1A3 /* SwiftyAlert.swift in Sources */,
 				0C7103621F95B1610026C84D /* SwiftyColor.swift in Sources */,
 				0C658A8B1F86129C008AEB55 /* SwiftyView.swift in Sources */,
 				0C658A891F861297008AEB55 /* SwiftyImage.swift in Sources */,

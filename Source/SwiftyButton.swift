@@ -20,7 +20,7 @@ public class SwiftyButton: UIControl, ImageSettable
     private init(_ title: String? = nil, _ image: UIImage? = nil, _ handler: ClosureWrapper<SwiftyButton>)
     {
         super.init(frame: .zero)
-        UIButton.methodExchange
+        SwiftyButton.methodExchange
         backgroundColor = .clear
         isMultipleTouchEnabled = false
         isHidden = false
@@ -84,15 +84,15 @@ private extension SwiftyButton
     }
 }
 
-fileprivate extension UIControl
+fileprivate extension SwiftyButton
 {
-    private struct SwiftyAssociatedKeys {
+    private struct SwiftyButtonAssociatedKeys {
         fileprivate static var isIgnoreEventKey : UnsafeRawPointer = UnsafeRawPointer(UnsafeMutablePointer<UInt8>.allocate(capacity: 1))
     }
     
     private final var isIgnoreEvent : Bool? {
         get {
-            guard let obj = objc_getAssociatedObject(self, SwiftyAssociatedKeys.isIgnoreEventKey) as? Bool else {
+            guard let obj = objc_getAssociatedObject(self, SwiftyButtonAssociatedKeys.isIgnoreEventKey) as? Bool else {
                 
                 self.isIgnoreEvent = false
                 return self.isIgnoreEvent
@@ -100,7 +100,7 @@ fileprivate extension UIControl
             return obj
         }
         set {
-            objc_setAssociatedObject(self, SwiftyAssociatedKeys.isIgnoreEventKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+            objc_setAssociatedObject(self, SwiftyButtonAssociatedKeys.isIgnoreEventKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
         }
     }
     

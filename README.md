@@ -15,6 +15,7 @@ High performance and lightweight UIView,  UIImage, UIImageView, UIlabel, UIButto
 - [x] SwiftyLabel 300% High performance more than UIlabel, depending on UIView-package and TextKit
 - [x] SwiftyButton 300% High performance more than UIButton, depending on UIControl-package, TextKit and BackgroundImage-Advanced
 - [x] SwiftyToast is depend on globalCenter and show the toast without overlap.
+- [x] SwiftyAlert contains SuccessAlert, ErrorAlert, WarningAlert, InfoAlert, EditAlert and their special styles.
 - [x] lightweight, almost one class for each UI
 - [x] UI loading thread-safe
 - [x] Block-Package to more easy to use
@@ -241,6 +242,28 @@ SwiftyToas  is depend on global runloop cente, also show the toast without overl
 
 ```swift
 SwiftyToast.load("This is a Toast")
+```
+
+### SwiftyAlert
+
+SwiftyAlert contains SuccessAlert, ErrorAlert, WarningAlert, InfoAlert, EditAlert and their special styles.
+
+```swift
+let alert: SwiftyAlertView = .create()
+
+_ = alert.addTextField()
+
+_ = alert.addButton("First Button", action: {
+    print("First Button tapped")
+})
+_ = alert.addButton("Second Button") {
+    print("Second button tapped")
+}
+
+let theAlert: SwiftyAlertViewResponder = alert.showSuccess("Congratulations", subTitle: "You've just displayed this awesome Pop Up View") //showError, showWarning, showInfo, showEdit
+theAlert.setDismissBlock {
+    print("Alert Dismissed")
+}
 ```
 
 ### SwiftyThreadPool

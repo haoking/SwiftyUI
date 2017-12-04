@@ -101,6 +101,23 @@ class ViewController: UIViewController
     func btnTappedSelector(_ sender: SwiftyButton)
     {
         SwiftyToast.load("btnTappedSelector")
+        
+        
+        let alert: SwiftyAlertView = .create()
+        
+        _ = alert.addTextField()
+        
+        _ = alert.addButton("First Button", action: {
+            print("First Button tapped")
+        })
+        _ = alert.addButton("Second Button") {
+            print("Second button tapped")
+        }
+        
+        let theAlert: SwiftyAlertViewResponder = alert.showSuccess("Congratulations", subTitle: "You've just displayed this awesome Pop Up View")
+        theAlert.setDismissBlock {
+            print("Alert Dismissed")
+        }
     }
 }
 
