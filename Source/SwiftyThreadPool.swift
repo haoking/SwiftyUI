@@ -32,11 +32,11 @@ public final class SwiftyThreadPool
         queue.maxConcurrentOperationCount = MAX_THREAD_COUNT
         add(prepareEnvironment(), withIdentifier: "me.haoking.environmentOperation")
         self.queue = queue
-        NotificationCenter.default.addObserver(Notification.Name.UIApplicationDidReceiveMemoryWarning, object: nil, selector: ClosureWrapper({ [weak self] (_) in
+        NotificationCenter.default.addObserver(forName: Notification.Name.UIApplicationDidReceiveMemoryWarning, object: nil, queue: nil) { [weak self] (_) in
             
             guard let strongSelf = self else { return }
             strongSelf.removeAll()
-        }))
+        }
     }
     
     private func prepareEnvironment() -> BlockOperation

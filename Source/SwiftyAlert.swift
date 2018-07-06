@@ -384,51 +384,54 @@ public final class SwiftyAlertView: UIViewController
     {
         super.viewDidAppear(animated)
         
-        NotificationCenter.default.addObserver(NSNotification.Name.UIKeyboardWillShow, object: nil, selector: ClosureWrapper({ (notification) in
+        NotificationCenter.default.addObserver(forName: NSNotification.Name.UIKeyboardWillShow, object: nil, queue: nil) { [weak self] (notification) in
             
-            self.keyboardHasBeenShown = true
-            guard let notification = notification, let userInfo = notification.userInfo else {return}
+            guard let strongSelf = self else { return }
+            strongSelf.keyboardHasBeenShown = true
+            guard let userInfo = notification.userInfo else {return}
             guard let endKeyBoardFrame = (userInfo[UIKeyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue.minY else {return}
             
-            if self.tmpContentViewFrameOrigin == nil
+            if strongSelf.tmpContentViewFrameOrigin == nil
             {
-                self.tmpContentViewFrameOrigin = self.contentView.frame.origin
+                strongSelf.tmpContentViewFrameOrigin = strongSelf.contentView.frame.origin
             }
             
-            if self.tmpCircleViewFrameOrigin == nil
+            if strongSelf.tmpCircleViewFrameOrigin == nil
             {
-                self.tmpCircleViewFrameOrigin = self.circleBG.frame.origin
+                strongSelf.tmpCircleViewFrameOrigin = strongSelf.circleBG.frame.origin
             }
             
-            var newContentViewFrameY = self.contentView.frame.maxY - endKeyBoardFrame
+            var newContentViewFrameY = strongSelf.contentView.frame.maxY - endKeyBoardFrame
             if newContentViewFrameY < 0
             {
                 newContentViewFrameY = 0
             }
             
-            let newBallViewFrameY = self.circleBG.frame.origin.y - newContentViewFrameY
-            self.contentView.frame.origin.y -= newContentViewFrameY
-            self.circleBG.frame.origin.y = newBallViewFrameY
-        }))
-        
-        NotificationCenter.default.addObserver(NSNotification.Name.UIKeyboardWillHide, object: nil, selector: ClosureWrapper({ (notification) in
+            let newBallViewFrameY = strongSelf.circleBG.frame.origin.y - newContentViewFrameY
+            strongSelf.contentView.frame.origin.y -= newContentViewFrameY
+            strongSelf.circleBG.frame.origin.y = newBallViewFrameY
+        }
+
+        NotificationCenter.default.addObserver(forName: NSNotification.Name.UIKeyboardWillShow, object: nil, queue: nil) { [weak self] (notification) in
             
-            if(self.keyboardHasBeenShown)
+            guard let strongSelf = self else { return }
+            if(strongSelf.keyboardHasBeenShown)
             {//This could happen on the simulator (keyboard will be hidden)
-                if(self.tmpContentViewFrameOrigin != nil)
+                if(strongSelf.tmpContentViewFrameOrigin != nil)
                 {
-                    self.contentView.frame.origin.y = self.tmpContentViewFrameOrigin!.y
-                    self.tmpContentViewFrameOrigin = nil
+                    strongSelf.contentView.frame.origin.y = strongSelf.tmpContentViewFrameOrigin!.y
+                    strongSelf.tmpContentViewFrameOrigin = nil
                 }
-                if(self.tmpCircleViewFrameOrigin != nil)
+                if(strongSelf.tmpCircleViewFrameOrigin != nil)
                 {
-                    self.circleBG.frame.origin.y = self.tmpCircleViewFrameOrigin!.y
-                    self.tmpCircleViewFrameOrigin = nil
+                    strongSelf.circleBG.frame.origin.y = strongSelf.tmpCircleViewFrameOrigin!.y
+                    strongSelf.tmpCircleViewFrameOrigin = nil
                 }
                 
-                self.keyboardHasBeenShown = false
+                strongSelf.keyboardHasBeenShown = false
             }
-        }))
+            
+        }
     }
     
     open override func viewDidDisappear(_ animated: Bool)

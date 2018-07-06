@@ -14,52 +14,60 @@ public extension UIImage
     public final class func load(_ data: Data) -> UIImage?
     {
         var image : UIImage?
-        NSLock().locker(ClosureVoidWrapper({
-            image = UIImage(data: data)
-        }))
+        let lock = NSLock()
+        lock.lock()
+        image = UIImage(data: data)
+        lock.unlock()
         return image
     }
 
     public final class func load(_ data: Data, scale: CGFloat) -> UIImage?
     {
         var image : UIImage?
-        NSLock().locker(ClosureVoidWrapper({
-            image = UIImage(data: data, scale: scale)
-        }))
+        let lock = NSLock()
+        lock.lock()
+        image = UIImage(data: data, scale: scale)
+        lock.unlock()
         return image
     }
     
     public final class func load(_ name: String) -> UIImage?
     {
         var image : UIImage?
-        NSLock().locker(ClosureVoidWrapper({
-            let imageCachePool : ImageCachePool = .defalut
-            if let cacheImage = imageCachePool.image(withIdentifier: name)
-            {
-                image = cacheImage
-            }
-            else if let oriImage = UIImage(named: name)
-            {
-                oriImage.inflate()
-                imageCachePool.add(oriImage, withIdentifier: name)
-                image = oriImage
-            }
-        }))
+        let lock = NSLock()
+        lock.lock()
+        
+        let imageCachePool : ImageCachePool = .defalut
+        if let cacheImage = imageCachePool.image(withIdentifier: name)
+        {
+            image = cacheImage
+        }
+        else if let oriImage = UIImage(named: name)
+        {
+            oriImage.inflate()
+            imageCachePool.add(oriImage, withIdentifier: name)
+            image = oriImage
+        }
+        
+        lock.unlock()
         return image
     }
     
     public final class func load(_ aImage: UIImage?, identifier: String) -> UIImage?
     {
         var image : UIImage?
-        NSLock().locker(ClosureVoidWrapper({
-            let imageCachePool : ImageCachePool = .defalut
-            if let oriImage = aImage
-            {
-                oriImage.inflate()
-                imageCachePool.add(oriImage, withIdentifier: identifier)
-                image = oriImage
-            }
-        }))
+        let lock = NSLock()
+        lock.lock()
+        
+        let imageCachePool : ImageCachePool = .defalut
+        if let oriImage = aImage
+        {
+            oriImage.inflate()
+            imageCachePool.add(oriImage, withIdentifier: identifier)
+            image = oriImage
+        }
+        
+        lock.unlock()
         return image
     }
 }
@@ -210,11 +218,11 @@ public final class ImageCachePool: ImageCacheable
     
     private init()
     {
-        NotificationCenter.default.addObserver(Notification.Name.UIApplicationDidReceiveMemoryWarning, object: nil, selector: ClosureWrapper({ [weak self] (_) in
+        NotificationCenter.default.addObserver(forName: Notification.Name.UIApplicationDidReceiveMemoryWarning, object: nil, queue: nil) { [weak self] (_) in
             
             guard let strongSelf = self else { return }
             strongSelf.removeAllImages()
-        }))
+        }
     }
     
     deinit
