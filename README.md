@@ -340,6 +340,7 @@ Promise<String>.firstly(on: .background) { (update, _) in
 - **CameraKit**, it is a lightweight camera framework.
 - **OpenGL** Video / Image processing.
 - **Metal** Video / Image processing.
+- **OpenCV** Computer vision processing.
 
 ## License
 
