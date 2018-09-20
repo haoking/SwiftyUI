@@ -78,11 +78,11 @@ public extension UIColor
         let threshold: CGFloat = 0.25
         var result :Bool = false
         
-        if fabs(redValue - color.redValue) > threshold || fabs(greenValue - color.greenValue) > threshold || fabs(blueValue - color.blueValue) > threshold
+        if abs(redValue - color.redValue) > threshold || abs(greenValue - color.greenValue) > threshold || abs(blueValue - color.blueValue) > threshold
         {
-            if fabs(redValue - greenValue) < 0.03 && fabs(redValue - blueValue) < 0.03
+            if abs(redValue - greenValue) < 0.03 && abs(redValue - blueValue) < 0.03
             {
-                if fabs(color.redValue - color.greenValue) < 0.03 && fabs(color.redValue - color.blueValue) < 0.03
+                if abs(color.redValue - color.greenValue) < 0.03 && abs(color.redValue - color.blueValue) < 0.03
                 {
                     result = false
                 }

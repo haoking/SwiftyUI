@@ -26,7 +26,7 @@ public final class SwiftyToast
     }
     
     @discardableResult
-    open class func load(_ text: String) -> SwiftyToast
+    public class func load(_ text: String) -> SwiftyToast
     {
         return .init(text: text)
     }
@@ -86,7 +86,7 @@ public final class SwiftyToast
             }.catch()
     }
     
-    open class func cancel()
+    public class func cancel()
     {
         SwiftyToastCenter.default.cancelAll()
     }
@@ -97,26 +97,26 @@ private final class SwiftyToastCenter
     private var queueArray: [SwiftyToast] = []
     private var isFinished: Bool = true
     
-    open static let `default` = {
+    public static let `default` = {
         return SwiftyToastCenter()
     }()
     
     private init(){}
     
     @discardableResult
-    open func add(_ toast: SwiftyToast) -> SwiftyToastCenter
+    public func add(_ toast: SwiftyToast) -> SwiftyToastCenter
     {
         queueArray.append(toast)
         return self
     }
     
-    open func finish()
+    public func finish()
     {
         isFinished = true
         fire()
     }
     
-    open func fire()
+    public func fire()
     {
         guard let toast = queueArray.first, isFinished == true else { return }
         queueArray.removeFirst()
@@ -124,7 +124,7 @@ private final class SwiftyToastCenter
         toast.show()
     }
     
-    open func cancelAll()
+    public func cancelAll()
     {
         queueArray.removeAll()
     }

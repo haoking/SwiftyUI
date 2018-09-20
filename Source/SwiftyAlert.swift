@@ -50,22 +50,22 @@ public final class SwiftyAlertViewResponder
         self.alertview = alertview
     }
     
-    open func setTitle(_ title: String)
+    public func setTitle(_ title: String)
     {
         self.alertview.labelTitle.text = title
     }
     
-    open func setSubTitle(_ subTitle: String)
+    public func setSubTitle(_ subTitle: String)
     {
         self.alertview.viewText.text = subTitle
     }
     
-    open func close()
+    public func close()
     {
         self.alertview.hideView()
     }
     
-    open func setDismissBlock(_ dismissBlock: @escaping () -> Void)
+    public func setDismissBlock(_ dismissBlock: @escaping () -> Void)
     {
         self.alertview.dismissBlock = dismissBlock
     }
@@ -173,7 +173,7 @@ public final class SwiftyAlertView: UIViewController
     var viewColor = UIColor()
     
     // UI Options
-    open var iconTintColor: UIColor?
+    public var iconTintColor: UIColor?
 //    open var customSubview : UIView?
     
     // Members declaration
@@ -212,7 +212,7 @@ public final class SwiftyAlertView: UIViewController
     {
         // Set up main view
         view.frame = UIScreen.main.bounds
-        view.autoresizingMask = [UIViewAutoresizing.flexibleHeight, UIViewAutoresizing.flexibleWidth]
+        view.autoresizingMask = [UIView.AutoresizingMask.flexibleHeight, UIView.AutoresizingMask.flexibleWidth]
         view.backgroundColor = UIColor(red:0, green:0, blue:0, alpha:appearance.kDefaultShadowOpacity)
         view.addSubview(baseView)
         // Base View
@@ -264,7 +264,7 @@ public final class SwiftyAlertView: UIViewController
         }
     }
     
-    override open func viewWillLayoutSubviews()
+    override public func viewWillLayoutSubviews()
     {
         super.viewWillLayoutSubviews()
         let rv: UIWindow = UIApplication.shared.keyWindow!
@@ -380,16 +380,16 @@ public final class SwiftyAlertView: UIViewController
     var tmpCircleViewFrameOrigin: CGPoint?
     var keyboardHasBeenShown:Bool = false
     
-    override open func viewDidAppear(_ animated: Bool)
+    override public func viewDidAppear(_ animated: Bool)
     {
         super.viewDidAppear(animated)
         
-        NotificationCenter.default.addObserver(forName: NSNotification.Name.UIKeyboardWillShow, object: nil, queue: nil) { [weak self] (notification) in
+        NotificationCenter.default.addObserver(forName: UIResponder.keyboardWillShowNotification, object: nil, queue: nil) { [weak self] (notification) in
             
             guard let strongSelf = self else { return }
             strongSelf.keyboardHasBeenShown = true
             guard let userInfo = notification.userInfo else {return}
-            guard let endKeyBoardFrame = (userInfo[UIKeyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue.minY else {return}
+            guard let endKeyBoardFrame = (userInfo[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue.minY else {return}
             
             if strongSelf.tmpContentViewFrameOrigin == nil
             {
@@ -412,7 +412,7 @@ public final class SwiftyAlertView: UIViewController
             strongSelf.circleBG.frame.origin.y = newBallViewFrameY
         }
 
-        NotificationCenter.default.addObserver(forName: NSNotification.Name.UIKeyboardWillShow, object: nil, queue: nil) { [weak self] (notification) in
+        NotificationCenter.default.addObserver(forName: UIResponder.keyboardWillShowNotification, object: nil, queue: nil) { [weak self] (notification) in
             
             guard let strongSelf = self else { return }
             if(strongSelf.keyboardHasBeenShown)
@@ -434,14 +434,14 @@ public final class SwiftyAlertView: UIViewController
         }
     }
     
-    open override func viewDidDisappear(_ animated: Bool)
+    public override func viewDidDisappear(_ animated: Bool)
     {
         super.viewDidDisappear(animated)
-        NotificationCenter.default.removeObserver(self, name: NSNotification.Name.UIKeyboardWillShow, object: nil)
-        NotificationCenter.default.removeObserver(self, name: NSNotification.Name.UIKeyboardWillHide, object: nil)
+        NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillShowNotification, object: nil)
+        NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillHideNotification, object: nil)
     }
     
-    override open func touchesEnded(_ touches:Set<UITouch>, with event:UIEvent?)
+    override public func touchesEnded(_ touches:Set<UITouch>, with event:UIEvent?)
     {
         if let count = event?.touches(for: view)?.count, count > 0
         {
@@ -449,16 +449,16 @@ public final class SwiftyAlertView: UIViewController
         }
     }
     
-    open func addTextField(_ title:String?=nil) -> UITextField
+    public func addTextField(_ title:String?=nil) -> UITextField
     {
         // Update view height
         appearance.setkWindowHeight(appearance.kWindowHeight + appearance.kTextFieldHeight)
         // Add text field
         let txt = UITextField()
-        txt.borderStyle = UITextBorderStyle.roundedRect
+        txt.borderStyle = UITextField.BorderStyle.roundedRect
         txt.font = appearance.kTextFont
         txt.autocapitalizationType = UITextAutocapitalizationType.words
-        txt.clearButtonMode = UITextFieldViewMode.whileEditing
+        txt.clearButtonMode = UITextField.ViewMode.whileEditing
         txt.layer.masksToBounds = true
         txt.layer.borderWidth = 1.0
         txt.placeholder = title
@@ -467,7 +467,7 @@ public final class SwiftyAlertView: UIViewController
         return txt
     }
     
-    open func addTextView() -> UITextView
+    public func addTextView() -> UITextView
     {
         // Update view height
         appearance.setkWindowHeight(appearance.kWindowHeight + appearance.kTextViewdHeight)
@@ -482,13 +482,13 @@ public final class SwiftyAlertView: UIViewController
     }
     
     @discardableResult
-    open func addButton(_ title:String, action:@escaping ()->Void) -> SwiftyAlertButton
+    public func addButton(_ title:String, action:@escaping ()->Void) -> SwiftyAlertButton
     {
         appearance.setkWindowHeight(appearance.kWindowHeight + appearance.kButtonHeight)
         // Add button
         let btn = SwiftyAlertButton()
         btn.layer.masksToBounds = true
-        btn.setTitle(title, for: UIControlState())
+        btn.setTitle(title, for: UIControl.State())
         btn.titleLabel?.font = appearance.kButtonFont
 
         btn.action = action
@@ -542,41 +542,41 @@ public final class SwiftyAlertView: UIViewController
     
     // showSuccess(view, title, subTitle)
     @discardableResult
-    open func showSuccess(_ title: String, subTitle: String, colorStyle: UInt=SwiftyAlertViewStyle.success.defaultColorInt, colorTextButton: UInt=0xFFFFFF, circleIconImage: UIImage? = nil) -> SwiftyAlertViewResponder
+    public func showSuccess(_ title: String, subTitle: String, colorStyle: UInt=SwiftyAlertViewStyle.success.defaultColorInt, colorTextButton: UInt=0xFFFFFF, circleIconImage: UIImage? = nil) -> SwiftyAlertViewResponder
     {
         return showTitle(title, subTitle: subTitle, style: .success, colorStyle: colorStyle, colorTextButton: colorTextButton, circleIconImage: circleIconImage)
     }
     
     // showError(view, title, subTitle)
     @discardableResult
-    open func showError(_ title: String, subTitle: String, colorStyle: UInt=SwiftyAlertViewStyle.error.defaultColorInt, colorTextButton: UInt=0xFFFFFF, circleIconImage: UIImage? = nil) -> SwiftyAlertViewResponder
+    public func showError(_ title: String, subTitle: String, colorStyle: UInt=SwiftyAlertViewStyle.error.defaultColorInt, colorTextButton: UInt=0xFFFFFF, circleIconImage: UIImage? = nil) -> SwiftyAlertViewResponder
     {
         return showTitle(title, subTitle: subTitle, style: .error, colorStyle: colorStyle, colorTextButton: colorTextButton, circleIconImage: circleIconImage)
     }
     
     // showWarning(view, title, subTitle)
     @discardableResult
-    open func showWarning(_ title: String, subTitle: String, colorStyle: UInt=SwiftyAlertViewStyle.warning.defaultColorInt, colorTextButton: UInt=0x000000, circleIconImage: UIImage? = nil) -> SwiftyAlertViewResponder
+    public func showWarning(_ title: String, subTitle: String, colorStyle: UInt=SwiftyAlertViewStyle.warning.defaultColorInt, colorTextButton: UInt=0x000000, circleIconImage: UIImage? = nil) -> SwiftyAlertViewResponder
     {
         return showTitle(title, subTitle: subTitle, style: .warning, colorStyle: colorStyle, colorTextButton: colorTextButton, circleIconImage: circleIconImage)
     }
     
     // showInfo(view, title, subTitle)
     @discardableResult
-    open func showInfo(_ title: String, subTitle: String, colorStyle: UInt=SwiftyAlertViewStyle.info.defaultColorInt, colorTextButton: UInt=0xFFFFFF, circleIconImage: UIImage? = nil) -> SwiftyAlertViewResponder
+    public func showInfo(_ title: String, subTitle: String, colorStyle: UInt=SwiftyAlertViewStyle.info.defaultColorInt, colorTextButton: UInt=0xFFFFFF, circleIconImage: UIImage? = nil) -> SwiftyAlertViewResponder
     {
         return showTitle(title, subTitle: subTitle, style: .info, colorStyle: colorStyle, colorTextButton: colorTextButton, circleIconImage: circleIconImage)
     }
     
     @discardableResult
-    open func showEdit(_ title: String, subTitle: String, colorStyle: UInt=SwiftyAlertViewStyle.edit.defaultColorInt, colorTextButton: UInt=0xFFFFFF, circleIconImage: UIImage? = nil) -> SwiftyAlertViewResponder
+    public func showEdit(_ title: String, subTitle: String, colorStyle: UInt=SwiftyAlertViewStyle.edit.defaultColorInt, colorTextButton: UInt=0xFFFFFF, circleIconImage: UIImage? = nil) -> SwiftyAlertViewResponder
     {
         return showTitle(title, subTitle: subTitle, style: .edit, colorStyle: colorStyle, colorTextButton: colorTextButton, circleIconImage: circleIconImage)
     }
     
     // showTitle(view, title, subTitle, timeout, style)
     @discardableResult
-    open func showTitle(_ title: String, subTitle: String, style: SwiftyAlertViewStyle, colorStyle: UInt?=0x000000, colorTextButton: UInt?=0xFFFFFF, circleIconImage: UIImage? = nil) -> SwiftyAlertViewResponder
+    public func showTitle(_ title: String, subTitle: String, style: SwiftyAlertViewStyle, colorStyle: UInt?=0x000000, colorTextButton: UInt?=0xFFFFFF, circleIconImage: UIImage? = nil) -> SwiftyAlertViewResponder
     {
         selfReference = self
         view.alpha = 0
@@ -631,7 +631,7 @@ public final class SwiftyAlertView: UIViewController
             viewText.text = subTitle
             // Adjust text view size, if necessary
             let str = subTitle as NSString
-            let attr = [NSAttributedStringKey.font:viewText.font ?? UIFont()]
+            let attr = [NSAttributedString.Key.font:viewText.font ?? UIFont()]
             let sz = CGSize(width: appearance.kWindowWidth - 24, height:90)
             let r = str.boundingRect(with: sz, options: NSStringDrawingOptions.usesLineFragmentOrigin, attributes:attr, context:nil)
             let ht = ceil(r.size.height)
@@ -677,7 +677,7 @@ public final class SwiftyAlertView: UIViewController
         for (_, btn) in buttons.enumerated()
         {
             btn.backgroundColor = viewColor
-            btn.setTitleColor(UIColor.hex(colorTextButton ?? 0xFFFFFF), for:UIControlState())
+            btn.setTitleColor(UIColor.hex(colorTextButton ?? 0xFFFFFF), for: UIControl.State())
         }
         
         // Animate in the alert view
@@ -730,7 +730,7 @@ public final class SwiftyAlertView: UIViewController
     
     // Close SwiftyAlertView
     @objc
-    open func hideView()
+    public func hideView()
     {
         UIView.animate(withDuration: 0.2, animations: {
             self.view.alpha = 0
@@ -765,7 +765,7 @@ public final class SwiftyAlertView: UIViewController
     }
     
     //Return true if a SwiftyAlertView is already being shown, false otherwise
-    open func isShowing() -> Bool
+    public func isShowing() -> Bool
     {
         if let subviews = UIApplication.shared.keyWindow?.subviews
         {
@@ -1021,7 +1021,7 @@ fileprivate extension String
     func heightWithConstrainedWidth(width: CGFloat, font: UIFont) -> CGFloat
     {
         let constraintRect = CGSize(width: width, height: CGFloat.greatestFiniteMagnitude)
-        let boundingBox = self.boundingRect(with: constraintRect, options: NSStringDrawingOptions.usesLineFragmentOrigin, attributes: [NSAttributedStringKey.font: font], context: nil)
+        let boundingBox = self.boundingRect(with: constraintRect, options: NSStringDrawingOptions.usesLineFragmentOrigin, attributes: [NSAttributedString.Key.font: font], context: nil)
         return boundingBox.height
     }
 }

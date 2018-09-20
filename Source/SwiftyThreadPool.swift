@@ -21,7 +21,7 @@ public final class SwiftyThreadPool
         }
     }
     
-    open static let defalut: SwiftyThreadPool = {
+    public static let defalut: SwiftyThreadPool = {
         return SwiftyThreadPool()
     }()
     
@@ -32,7 +32,7 @@ public final class SwiftyThreadPool
         queue.maxConcurrentOperationCount = MAX_THREAD_COUNT
         add(prepareEnvironment(), withIdentifier: "me.haoking.environmentOperation")
         self.queue = queue
-        NotificationCenter.default.addObserver(forName: Notification.Name.UIApplicationDidReceiveMemoryWarning, object: nil, queue: nil) { [weak self] (_) in
+        NotificationCenter.default.addObserver(forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: nil) { [weak self] (_) in
             
             guard let strongSelf = self else { return }
             strongSelf.removeAll()
@@ -50,7 +50,7 @@ public final class SwiftyThreadPool
             while Thread.current.isCancelled == false
             {
                 _ = autoreleasepool {
-                    RunLoop.current.run(mode: .defaultRunLoopMode, before: Date.distantFuture)
+                    RunLoop.current.run(mode: RunLoop.Mode.default, before: Date.distantFuture)
                 }
             }
         }

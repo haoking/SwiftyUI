@@ -48,7 +48,7 @@ public extension SwiftyImageView
         case flipFromTop(TimeInterval)
         case custom(
             duration: TimeInterval,
-            animationOptions: UIViewAnimationOptions,
+            animationOptions: UIView.AnimationOptions,
             animations: (SwiftyImageView, UIImage) -> Void,
             completion: ((Bool) -> Void)?
         )
@@ -78,10 +78,10 @@ public extension SwiftyImageView
         }
         
         /// The animation options of the image transition.
-        public var animationOptions: UIViewAnimationOptions {
+        public var animationOptions: UIView.AnimationOptions {
             switch self {
             case .noTransition:
-                return UIViewAnimationOptions()
+                return UIView.AnimationOptions()
             case .crossDissolve:
                 return .transitionCrossDissolve
             case .curlDown:
