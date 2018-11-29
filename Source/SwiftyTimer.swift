@@ -36,7 +36,7 @@ public extension Timer
         return timer
     }
     
-    public final func start(runLoop: RunLoop = .current, modes: [RunLoopMode] = [.defaultRunLoopMode])
+    public final func start(runLoop: RunLoop = .current, modes: [RunLoop.Mode] = [RunLoop.Mode.default])
     {
         for (_, mode) in modes.enumerated().reversed()
         {

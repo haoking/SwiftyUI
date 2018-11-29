@@ -212,13 +212,13 @@ public extension UIImage
     
 public final class ImageCachePool: ImageCacheable
 {
-    open static let `defalut`: ImageCachePool = {
+    public static let `defalut`: ImageCachePool = {
         return ImageCachePool()
     }()
     
     private init()
     {
-        NotificationCenter.default.addObserver(forName: Notification.Name.UIApplicationDidReceiveMemoryWarning, object: nil, queue: nil) { [weak self] (_) in
+        NotificationCenter.default.addObserver(forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: nil) { [weak self] (_) in
             
             guard let strongSelf = self else { return }
             strongSelf.removeAllImages()
