@@ -342,6 +342,7 @@ Promise<String>.firstly(on: .background) { (update, _) in
 - **OpenGL** Video / Image processing.
 - **Metal** Video / Image processing.
 - **OpenCV** Computer vision processing.
+- **Vision Framework** Face Detection.
 
 ## License
 
