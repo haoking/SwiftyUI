@@ -1,6 +1,6 @@
 # SwiftyUI [![Awesome](https://cdn.rawgit.com/sindresorhus/awesome/d7305f38d29fed78fa85652e3a63e154dd8e8829/media/badge.svg)](https://github.com/sindresorhus/awesome) 
 
-![Build Status](https://travis-ci.org/haoking/SwiftyUI.svg?branch=master) ![CocoaPods Compatible](https://img.shields.io/cocoapods/v/SwiftyUI.svg) ![Platform](https://img.shields.io/cocoapods/p/SwiftyUI.svg?style=flat) ![Swift 3.0+](https://img.shields.io/badge/Swift-3.0+-orange.svg)
+![Build Status](https://travis-ci.org/haoking/SwiftyUI.svg?branch=master) ![CocoaPods Compatible](https://img.shields.io/cocoapods/v/SwiftyUI.svg) ![Platform](https://img.shields.io/cocoapods/p/SwiftyUI.svg?style=flat) ![Swift 4.0+](https://img.shields.io/badge/Swift-4.0%2B-orange.svg)
 
 High performance and lightweight UIView,  UIImage, UIImageView, UIlabel, UIButton and more.
 
@@ -27,6 +27,7 @@ High performance and lightweight UIView,  UIImage, UIImageView, UIlabel, UIButto
 
 - iOS 8.0+
 - Xcode 9.0+
+- Swift 3.0+
 - Swift 4.0+
 
 ## Communication
