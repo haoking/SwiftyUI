@@ -11,7 +11,7 @@ import Foundation
 public extension Timer
 {
     @discardableResult
-    public final class func after(_ interval: TimeInterval, _ wrapper: ClosureWrapper<Timer>) -> Timer
+    final class func after(_ interval: TimeInterval, _ wrapper: ClosureWrapper<Timer>) -> Timer
     {
         var timer: Timer!
         timer = CFRunLoopTimerCreateWithHandler(kCFAllocatorDefault, CFAbsoluteTimeGetCurrent() + interval, 0, 0, 0) {_ in
@@ -24,7 +24,7 @@ public extension Timer
     }
     
     @discardableResult
-    public final class func every(_ interval: TimeInterval, _ wrapper: ClosureWrapper<Timer>) -> Timer
+    final class func every(_ interval: TimeInterval, _ wrapper: ClosureWrapper<Timer>) -> Timer
     {
         var timer: Timer!
         timer = CFRunLoopTimerCreateWithHandler(kCFAllocatorDefault, CFAbsoluteTimeGetCurrent() + interval, interval, 0, 0) { _ in
@@ -36,7 +36,7 @@ public extension Timer
         return timer
     }
     
-    public final func start(runLoop: RunLoop = .current, modes: [RunLoop.Mode] = [RunLoop.Mode.default])
+    final func start(runLoop: RunLoop = .current, modes: [RunLoop.Mode] = [RunLoop.Mode.default])
     {
         for (_, mode) in modes.enumerated().reversed()
         {

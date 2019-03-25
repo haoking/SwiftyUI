@@ -15,7 +15,7 @@ public protocol ImageSettable: class
 
 public extension ImageSettable where Self: UIView
 {
-    public var backgroundImage: UIImage? {
+    var backgroundImage: UIImage? {
         get {
             guard let obj = layer.contents else { return nil }
             return UIImage(cgImage: obj as! CGImage)

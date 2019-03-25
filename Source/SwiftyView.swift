@@ -31,7 +31,7 @@ public class SwiftyView : UIView
 public extension UIView
 {
     @discardableResult
-    public final func addTo( _ view: UIView) -> Self
+    final func addTo( _ view: UIView) -> Self
     {
         UIView.methodExchange
         view.addSubview(self)
@@ -63,7 +63,7 @@ public extension UIView
         updateOpaque()
     }
     
-    public final func updateOpaque()
+    final func updateOpaque()
     {
         if let color = backgroundColor, color.alphaValue == 1.0, alpha == 1.0
         {

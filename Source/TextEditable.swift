@@ -82,7 +82,7 @@ public protocol TextEditable: class
 public extension TextEditable where Self: UIView
 {
     //required
-    public func loadText()
+    func loadText()
     {
         layoutManager.addTextContainer(container)
     }
@@ -173,7 +173,7 @@ extension TextEditable where Self: UIView
 
 public extension TextEditable where Self: UIView
 {
-    public var usesIntrinsicContentSize : Bool {
+    var usesIntrinsicContentSize : Bool {
         get {
             guard let obj = objc_getAssociatedObject(self, TextContentAlignment.TextEditablePublicSwiftyAssociatedKeys.usesIntrinsicContentSizeKey) as? Bool else {
                 
@@ -191,7 +191,7 @@ public extension TextEditable where Self: UIView
         }
     }
     
-    public var textAlignment : TextContentAlignment {
+    var textAlignment : TextContentAlignment {
         get {
             guard let obj = objc_getAssociatedObject(self, TextContentAlignment.TextEditablePublicSwiftyAssociatedKeys.textAlignmentKey) as? TextContentAlignment else {
                 
@@ -209,7 +209,7 @@ public extension TextEditable where Self: UIView
         }
     }
     
-    public var font : UIFont {
+    var font : UIFont {
         get {
             guard let obj = objc_getAssociatedObject(self, TextContentAlignment.TextEditablePublicSwiftyAssociatedKeys.fontKey) as? UIFont else {
                 
@@ -227,7 +227,7 @@ public extension TextEditable where Self: UIView
         }
     }
     
-    public var textColor : UIColor? {
+    var textColor : UIColor? {
         get {
             guard let obj = objc_getAssociatedObject(self, TextContentAlignment.TextEditablePublicSwiftyAssociatedKeys.textColorKey) as? UIColor else {
                 
@@ -245,7 +245,7 @@ public extension TextEditable where Self: UIView
         }
     }
     
-    public var paragraphStyle : NSParagraphStyle {
+    var paragraphStyle : NSParagraphStyle {
         get {
             guard let obj = objc_getAssociatedObject(self, TextContentAlignment.TextEditablePublicSwiftyAssociatedKeys.paragraphStyleKey) as? NSParagraphStyle else {
                 
@@ -263,7 +263,7 @@ public extension TextEditable where Self: UIView
         }
     }
     
-    public var shadow : NSShadow? {
+    var shadow : NSShadow? {
         get {
             guard let obj = objc_getAssociatedObject(self, TextContentAlignment.TextEditablePublicSwiftyAssociatedKeys.shadowKey) as? NSShadow else { return nil }
             return obj
@@ -277,7 +277,7 @@ public extension TextEditable where Self: UIView
         }
     }
     
-    public var attributedText : NSAttributedString? {
+    var attributedText : NSAttributedString? {
         get {
             guard let obj = objc_getAssociatedObject(self, TextContentAlignment.TextEditablePublicSwiftyAssociatedKeys.attributedTextKey) as? NSAttributedString else { return nil }
             return obj
@@ -296,7 +296,7 @@ public extension TextEditable where Self: UIView
 public extension TextEditable where Self: UIView
 {
     /// default is `0`.
-    public var numberOfLines: Int {
+    var numberOfLines: Int {
         get { return container.maximumNumberOfLines }
         set {
             container.maximumNumberOfLines = newValue
@@ -308,7 +308,7 @@ public extension TextEditable where Self: UIView
     }
     
     /// `lineFragmentPadding` of `NSTextContainer`. default is `0`.
-    public var padding: CGFloat {
+    var padding: CGFloat {
         get { return container.lineFragmentPadding }
         set {
             container.lineFragmentPadding = newValue
@@ -320,7 +320,7 @@ public extension TextEditable where Self: UIView
     }
     
     /// default is `ByTruncatingTail`.
-    public var lineBreakMode: NSLineBreakMode {
+    var lineBreakMode: NSLineBreakMode {
         get { return container.lineBreakMode }
         set {
             container.lineBreakMode = newValue
@@ -332,7 +332,7 @@ public extension TextEditable where Self: UIView
     }
     
     /// default is nil.
-    public var text: String? {
+    var text: String? {
         get {
             return attributedText?.string
         }
@@ -345,7 +345,7 @@ public extension TextEditable where Self: UIView
         }
     }
     
-    public var mergedAttributedText: NSAttributedString? {
+    var mergedAttributedText: NSAttributedString? {
         if let attributedText = attributedText {
             return mergeAttributes(attributedText)
         }
@@ -372,7 +372,7 @@ public extension TextEditable where Self: UIView
 fileprivate extension NSMutableAttributedString
 {
     @discardableResult
-    fileprivate final func addAttribute(_ attrName: NSAttributedString.Key, attr: AnyObject, in range: NSRange? = nil) -> Self
+    final func addAttribute(_ attrName: NSAttributedString.Key, attr: AnyObject, in range: NSRange? = nil) -> Self
     {
         let range = range ?? NSRange(location: 0, length: length)
         enumerateAttribute(attrName, in: range, options: .reverse) { object, range, pointer in

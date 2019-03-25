@@ -10,13 +10,13 @@ import UIKit
 
 public extension UIColor
 {
-    public final class func load(R: CGFloat, G: CGFloat, B: CGFloat, A: CGFloat = 1.0) -> UIColor
+    final class func load(R: CGFloat, G: CGFloat, B: CGFloat, A: CGFloat = 1.0) -> UIColor
     {
         let divisor : CGFloat = 255.0
         return UIColor(red: R / divisor, green: G / divisor, blue: B / divisor, alpha: A)
     }
     
-    public final class func hex(_ hex: UInt, with alpha: CGFloat = 1.0) -> UIColor
+    final class func hex(_ hex: UInt, with alpha: CGFloat = 1.0) -> UIColor
     {
         let mask : Int = 0xFF
         let r : CGFloat = CGFloat(Int(hex >> 16) & mask)
@@ -25,7 +25,7 @@ public extension UIColor
         return .load(R:r, G:g, B:b, A:alpha)
     }
     
-    public final class func hex(_ hexString: String, with alpha: CGFloat = 1.0) -> UIColor
+    final class func hex(_ hexString: String, with alpha: CGFloat = 1.0) -> UIColor
     {
         var hex : String = hexString.hasPrefix("#") ? String(hexString.dropFirst()) : hexString
         guard hex.count == 3 || hex.count == 6 else { return UIColor(white: 1.0, alpha: 0.0) }
@@ -42,10 +42,10 @@ public extension UIColor
 
 public extension UIColor
 {
-    public final var redValue: CGFloat { return rgba().r }
-    public final var greenValue: CGFloat { return rgba().g }
-    public final var blueValue: CGFloat { return rgba().b }
-    public final var alphaValue: CGFloat { return rgba().a }
+    final var redValue: CGFloat { return rgba().r }
+    final var greenValue: CGFloat { return rgba().g }
+    final var blueValue: CGFloat { return rgba().b }
+    final var alphaValue: CGFloat { return rgba().a }
     
     private final func rgba() -> (r: CGFloat, g: CGFloat, b: CGFloat, a: CGFloat)
     {
@@ -103,7 +103,7 @@ public extension UIColor
 
 public extension UIImage
 {
-    public final func colors(_ complete: ((_ background: UIColor, _ primary: UIColor, _ secondary: UIColor, _ detail: UIColor) -> Void)?)
+    final func colors(_ complete: ((_ background: UIColor, _ primary: UIColor, _ secondary: UIColor, _ detail: UIColor) -> Void)?)
     {
         Promise<(UIColor, UIColor, UIColor, UIColor)>.firstly { [weak self] (update, _) in
             
@@ -248,9 +248,9 @@ public extension UIImage
 
 public extension UIColor
 {
-    public final class var infoSystem: UIColor { get { return .load(R: 47.0, G: 112.0, B: 225.0) } }
-    public final class var successSystem: UIColor { get { return .load(R: 83.0, G: 215.0, B: 106.0) } }
-    public final class var warningSystem: UIColor { get { return .load(R: 221.0, G: 170.0, B: 59.0) } }
-    public final class var dangerSystem: UIColor { get { return .load(R: 229.0, G: 0.0, B: 15.0) } }
+    final class var infoSystem: UIColor { get { return .load(R: 47.0, G: 112.0, B: 225.0) } }
+    final class var successSystem: UIColor { get { return .load(R: 83.0, G: 215.0, B: 106.0) } }
+    final class var warningSystem: UIColor { get { return .load(R: 221.0, G: 170.0, B: 59.0) } }
+    final class var dangerSystem: UIColor { get { return .load(R: 229.0, G: 0.0, B: 15.0) } }
 }
 

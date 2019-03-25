@@ -104,7 +104,7 @@ fileprivate extension SwiftyButton
         }
     }
     
-    fileprivate static let methodExchange : Void = {
+    static let methodExchange : Void = {
         
         let originalSelector : Selector = #selector(sendAction(_:to:for:))
         let swizzledSelector : Selector = #selector(mySendAction(_:to:for:))

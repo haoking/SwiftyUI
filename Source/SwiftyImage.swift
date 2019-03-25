@@ -11,7 +11,7 @@ import UIKit
 
 public extension UIImage
 {
-    public final class func load(_ data: Data) -> UIImage?
+    final class func load(_ data: Data) -> UIImage?
     {
         var image : UIImage?
         let lock = NSLock()
@@ -21,7 +21,7 @@ public extension UIImage
         return image
     }
 
-    public final class func load(_ data: Data, scale: CGFloat) -> UIImage?
+    final class func load(_ data: Data, scale: CGFloat) -> UIImage?
     {
         var image : UIImage?
         let lock = NSLock()
@@ -31,7 +31,7 @@ public extension UIImage
         return image
     }
     
-    public final class func load(_ name: String) -> UIImage?
+    final class func load(_ name: String) -> UIImage?
     {
         var image : UIImage?
         let lock = NSLock()
@@ -53,7 +53,7 @@ public extension UIImage
         return image
     }
     
-    public final class func load(_ aImage: UIImage?, identifier: String) -> UIImage?
+    final class func load(_ aImage: UIImage?, identifier: String) -> UIImage?
     {
         var image : UIImage?
         let lock = NSLock()
@@ -92,21 +92,21 @@ public extension UIImage
         }
     }
     
-    public final func inflate()
+    final func inflate()
     {
         guard isInflated == false else { return }
         isInflated = true
         _ = cgImage?.dataProvider?.data
     }
     
-    public final var isOpaque: Bool
+    final var isOpaque: Bool
     {
         
         let alphaInfo = cgImage?.alphaInfo
         return !(alphaInfo == .first || alphaInfo == .last || alphaInfo == .premultipliedFirst || alphaInfo == .premultipliedLast)
     }
 
-    public final func reSize(to size: CGSize) -> UIImage
+    final func reSize(to size: CGSize) -> UIImage
     {
         guard size.width > 0 && size.height > 0 else { return self }
         
@@ -118,7 +118,7 @@ public extension UIImage
         return scaledImage
     }
     
-    public final func reSize(toFit size: CGSize) -> UIImage
+    final func reSize(toFit size: CGSize) -> UIImage
     {
         guard size.width > 0 && size.height > 0 else { return self }
         
@@ -144,7 +144,7 @@ public extension UIImage
         return scaledImage
     }
     
-    public final func reSize(toFill size: CGSize) -> UIImage
+    final func reSize(toFill size: CGSize) -> UIImage
     {
         guard size.width > 0 && size.height > 0 else { return self }
 
@@ -170,7 +170,7 @@ public extension UIImage
         return scaledImage
     }
     
-    public final func rounded(withCornerRadius radius: CGFloat, divideRadiusByImageScale: Bool = false) -> UIImage
+    final func rounded(withCornerRadius radius: CGFloat, divideRadiusByImageScale: Bool = false) -> UIImage
     {
         UIGraphicsBeginImageContextWithOptions(size, false, 0.0)
         
@@ -187,7 +187,7 @@ public extension UIImage
         return roundedImage
     }
     
-    public final func roundedIntoCircle() -> UIImage
+    final func roundedIntoCircle() -> UIImage
     {
         let radius = min(size.width, size.height) / 2.0
         var squareImage = self
