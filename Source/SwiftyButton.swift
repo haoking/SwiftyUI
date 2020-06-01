@@ -11,13 +11,13 @@ import UIKit
 public class SwiftyButton: UIControl, ImageSettable
 {
     public final lazy var titleLabel: SwiftyLabel = { [unowned self] in
-        var titleLabel : SwiftyLabel = .load(nil, .black, .clear)
+        var titleLabel = SwiftyLabel(nil, .black, .clear)
         titleLabel.addTo(self)
         titleLabel.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         return titleLabel
         }()
     
-    private init(_ title: String? = nil, _ image: UIImage? = nil, _ handler: ClosureWrapper<SwiftyButton>)
+    public init(_ title: String? = nil, _ image: UIImage? = nil, _ handler: ClosureWrapper<SwiftyButton>)
     {
         super.init(frame: .zero)
         SwiftyButton.methodExchange
@@ -35,10 +35,10 @@ public class SwiftyButton: UIControl, ImageSettable
         fatalError("init(coder:) has not been implemented")
     }
     
-    public final class func load(_ title: String? = nil, _ image: UIImage? = nil, _ handler: ClosureWrapper<SwiftyButton>) -> SwiftyButton
-    {
-        return SwiftyButton.init(title, image, handler)
-    }
+//    public final class func load(_ title: String? = nil, _ image: UIImage? = nil, _ handler: ClosureWrapper<SwiftyButton>) -> SwiftyButton
+//    {
+//        return SwiftyButton.init(title, image, handler)
+//    }
 }
 
 private extension SwiftyButton

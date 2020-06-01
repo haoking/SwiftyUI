@@ -17,7 +17,7 @@ public class SwiftyImageView: UIView, ImageSettable
         }
     }
     
-    private init(_ image: UIImage? = nil)
+    public init(_ image: UIImage? = nil)
     {
         super.init(frame: .zero)
         self.image = image
@@ -28,10 +28,10 @@ public class SwiftyImageView: UIView, ImageSettable
         fatalError("init(coder:) has not been implemented")
     }
     
-    public final class func load(_ image: UIImage? = nil) -> SwiftyImageView
-    {
-        return SwiftyImageView(image)
-    }
+//    public final class func load(_ image: UIImage? = nil) -> SwiftyImageView
+//    {
+//        return SwiftyImageView(image)
+//    }
 }
 
 public extension SwiftyImageView

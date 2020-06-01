@@ -10,22 +10,25 @@ import UIKit
 
 public extension UIColor
 {
-    final class func load(R: CGFloat, G: CGFloat, B: CGFloat, A: CGFloat = 1.0) -> UIColor
+    @inlinable
+    @inline(__always)
+    static func load(_ R: CGFloat, _ G: CGFloat, _ B: CGFloat, _ A: CGFloat = 1.0) -> UIColor
     {
-        let divisor : CGFloat = 255.0
-        return UIColor(red: R / divisor, green: G / divisor, blue: B / divisor, alpha: A)
+        return UIColor(red: R / 255.0, green: G / 255.0, blue: B / 255.0, alpha: A)
     }
     
-    final class func hex(_ hex: UInt, with alpha: CGFloat = 1.0) -> UIColor
+    @inlinable
+    @inline(__always)
+    static func hex(_ hex: UInt, _ A: CGFloat = 1.0) -> UIColor
     {
         let mask : Int = 0xFF
-        let r : CGFloat = CGFloat(Int(hex >> 16) & mask)
-        let g : CGFloat = CGFloat(Int(hex >> 8 ) & mask)
-        let b : CGFloat = CGFloat(Int(hex      ) & mask)
-        return .load(R:r, G:g, B:b, A:alpha)
+        let r = CGFloat(Int(hex >> 16) & mask)
+        let g = CGFloat(Int(hex >> 8 ) & mask)
+        let b = CGFloat(Int(hex      ) & mask)
+        return load(r, g, b, A)
     }
     
-    final class func hex(_ hexString: String, with alpha: CGFloat = 1.0) -> UIColor
+    final class func hex(_ hexString: String, _ alpha: CGFloat = 1.0) -> UIColor
     {
         var hex : String = hexString.hasPrefix("#") ? String(hexString.dropFirst()) : hexString
         guard hex.count == 3 || hex.count == 6 else { return UIColor(white: 1.0, alpha: 0.0) }
@@ -36,7 +39,7 @@ public extension UIColor
                 hex.insert(char, at: hex.index(hex.startIndex, offsetBy: index * 2))
             }
         }
-        return .hex(UInt(hex, radix: 16)!, with: alpha)
+        return .hex(UInt(hex, radix: 16)!, alpha)
     }
 }
 
@@ -161,7 +164,7 @@ public extension UIImage
           for y in 0..<height
           {
             let pixel : Int = ((width * y) + x) * bytesPerPixel
-            let color : UIColor = .load(R: CGFloat((data?[pixel+1])!), G: CGFloat((data?[pixel+2])!), B: CGFloat((data?[pixel+3])!))
+            let color : UIColor = .load(CGFloat((data?[pixel+1])!), CGFloat((data?[pixel+2])!), CGFloat((data?[pixel+3])!))
             if x >= 5 && x <= 10
             {
               imageBackgroundColors.add(color)
@@ -245,12 +248,11 @@ public extension UIImage
         return (imageBackgroundColor, primaryColor ?? (isDarkBackgound ? whiteColor : blackColor), secondaryColor ?? (isDarkBackgound ? whiteColor : blackColor), detailColor ?? (isDarkBackgound ? whiteColor : blackColor))
     }
 }
-
 public extension UIColor
 {
-    final class var infoSystem: UIColor { get { return .load(R: 47.0, G: 112.0, B: 225.0) } }
-    final class var successSystem: UIColor { get { return .load(R: 83.0, G: 215.0, B: 106.0) } }
-    final class var warningSystem: UIColor { get { return .load(R: 221.0, G: 170.0, B: 59.0) } }
-    final class var dangerSystem: UIColor { get { return .load(R: 229.0, G: 0.0, B: 15.0) } }
+    final class var infoSystem: UIColor { get { return .load(47.0, 112.0, 225.0) } }
+    final class var successSystem: UIColor { get { return .load(83.0, 215.0, 106.0) } }
+    final class var warningSystem: UIColor { get { return .load(221.0, 170.0, 59.0) } }
+    final class var dangerSystem: UIColor { get { return .load(229.0, 0.0, 15.0) } }
 }
 

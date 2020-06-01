@@ -27,8 +27,7 @@ High performance and lightweight UIView,  UIImage, UIImageView, UIlabel, UIButto
 
 - iOS 8.0+
 - Xcode 9.0+
-- Swift 3.0+
-- Swift 4.0+
+- Swift 5.0+
 
 ## Communication
 
@@ -77,7 +76,7 @@ SwiftyView have a auto GPU rendering on color and Image showing.
 ```swift
 import SwiftyUI
 
-let myView : SwiftyView = SwiftyView.load().addTo(view)
+let myView : SwiftyView = SwiftyView().addTo(view)
 myView.frame = CGRect.init(x: 50, y: 50, width: 100, height: 100)
 ```
 
@@ -182,7 +181,7 @@ SwiftyImagView inherits from UIView and ImageSettable Protocol and its extension
 
 ```swift
 let myImage : UIImage? = UIImage.load("btnBG")
-let myImageView : SwiftyImageView = SwiftyImageView.load(myImage).addTo(view)
+let myImageView : SwiftyImageView = SwiftyImageView(myImage).addTo(view)
 myImageView.frame = CGRect.init(x: 50, y: 150 + 20, width: 100, height: 100)
 ```
 
@@ -192,7 +191,7 @@ By default, there is no image transition animation when setting the image on the
 
 ```swift
 let myImage : UIImage? = UIImage.load("btnBG")
-let myImageView : SwiftyImageView = SwiftyImageView.load(myImage).addTo(view)
+let myImageView : SwiftyImageView = SwiftyImageView(myImage).addTo(view)
 myImageView.frame = CGRect.init(x: 50, y: 150 + 20, width: 100, height: 100)
 
 let myTransition : SwiftyImageView.ImageTransition = .flipFromBottom(0.2)
@@ -205,7 +204,7 @@ myImageView.transition(myTransition, with: UIImage.load("aImage")!)
 SwiftyLabel is a better performance than UILabel and can be used like a standard UI component. Also, Easier to use than UILabel. Since UIView is inherited instead of UILabel, there is little wasteful processing. It uses the function of TextKit to draw characters.
 
 ```swift
-let myLable : SwiftyLabel = SwiftyLabel.load("Label", .white, .blue).addTo(view)
+let myLable : SwiftyLabel = SwiftyLabel("Label", .white, .blue).addTo(view)
 myLable.frame = CGRect.init(x: 50, y: 300 + 20 + 20, width: 100, height: 100)
 ```
 
@@ -214,7 +213,7 @@ myLable.frame = CGRect.init(x: 50, y: 300 + 20 + 20, width: 100, height: 100)
 SwiftyButton is a better performance than UIButton and can be used like a standard UI component. Also, Easier to use than UIButton because of block-package and mistake double tap IgnoreEvent. Since UIControl is inherited instead of UIbutton, there is little wasteful processing. It uses the function of TextKit to draw characters and Image feature from GPU.
 
 ```swift
-let myBtn : SwiftyButton = SwiftyButton.load("Button", myImage, ClosureWrapper({ [weak self] (btn) in
+let myBtn : SwiftyButton = SwiftyButton("Button", myImage, ClosureWrapper({ [weak self] (btn) in
             
             guard let strongSelf = self, let btn = btn else { return }
             // do something

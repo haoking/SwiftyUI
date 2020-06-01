@@ -21,18 +21,18 @@ class ViewController: UIViewController
     {
         super.viewDidLoad()
         
-        let myView : SwiftyView = SwiftyView.load().addTo(view)
+        let myView : SwiftyView = SwiftyView().addTo(view)
         myView.frame = CGRect(x: 50, y: 50, width: 100, height: 100)
         myView.backgroundColor = .black
         
         let myImage : UIImage? = UIImage.load("btnBG")
-        let myImageView : SwiftyImageView = SwiftyImageView.load(myImage).addTo(view)
+        let myImageView : SwiftyImageView = SwiftyImageView(myImage).addTo(view)
         myImageView.frame = CGRect(x: 50, y: 150 + 20, width: 100, height: 100)
         
-        let myLable : SwiftyLabel = SwiftyLabel.load("Label", .white, .blue).addTo(view)
+        let myLable : SwiftyLabel = SwiftyLabel("Label", .white, .blue).addTo(view)
         myLable.frame = CGRect(x: 50, y: 300 + 20 + 20, width: 100, height: 100)
         
-        let myBtn : SwiftyButton = SwiftyButton.load("Button", myImage, ClosureWrapper({ [weak self] (btn) in
+        let myBtn : SwiftyButton = SwiftyButton("Button", myImage, ClosureWrapper({ [weak self] (btn) in
             
             guard let strongSelf = self, let btn = btn else { return }
             print("BtnTaped")
@@ -100,7 +100,7 @@ class ViewController: UIViewController
     
     func btnTappedSelector(_ sender: SwiftyButton)
     {
-        SwiftyToast.load("btnTappedSelector")
+        var _ = SwiftyToast("btnTappedSelector")
         
         
         let alert: SwiftyAlertView = .create()

@@ -11,7 +11,7 @@ import UIKit
 public final class SwiftyToast
 {
     private lazy var toastLabel: SwiftyLabel = { [unowned self] in
-        var toastLabel : SwiftyLabel = .load(nil, .white, .init(white: 0.0, alpha: 0.7))
+        var toastLabel = SwiftyLabel(nil, .white, .init(white: 0.0, alpha: 0.7))
         toastLabel.layer.cornerRadius = 5
         toastLabel.clipsToBounds = true
         toastLabel.padding = 5.0
@@ -19,17 +19,17 @@ public final class SwiftyToast
         return toastLabel
         }()
     
-    private init(text: String)
+    public init(_ text: String)
     {
         layoutView(text: text)
         SwiftyToastCenter.default.add(self).fire()
     }
     
-    @discardableResult
-    public class func load(_ text: String) -> SwiftyToast
-    {
-        return .init(text: text)
-    }
+//    @discardableResult
+//    public class func load(_ text: String) -> SwiftyToast
+//    {
+//        return .init(text: text)
+//    }
     
     private func layoutView(text: String)
     {

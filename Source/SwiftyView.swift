@@ -10,7 +10,7 @@ import UIKit
 
 public class SwiftyView : UIView
 {
-    private init()
+    public init()
     {
         super.init(frame: .zero)
         backgroundColor = .clear
@@ -22,10 +22,10 @@ public class SwiftyView : UIView
         fatalError("init(coder:) has not been implemented")
     }
     
-    public final class func load() -> SwiftyView
-    {
-        return SwiftyView()
-    }
+//    public final class func load() -> SwiftyView
+//    {
+//        return SwiftyView()
+//    }
 }
 
 public extension UIView

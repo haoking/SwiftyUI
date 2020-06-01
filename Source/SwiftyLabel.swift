@@ -10,7 +10,7 @@ import UIKit
 
 public class SwiftyLabel: UIView, TextEditable
 {
-    private init(_ text: String? = nil, _ textColor: UIColor? = nil, _ backgroundColor: UIColor? = nil)
+    public init(_ text: String? = nil, _ textColor: UIColor? = nil, _ backgroundColor: UIColor? = nil)
     {
         super.init(frame: .zero)
         loadText()
@@ -37,10 +37,10 @@ public class SwiftyLabel: UIView, TextEditable
         fatalError("init(coder:) has not been implemented")
     }
     
-    public final class func load(_ text: String? = nil, _ textColor: UIColor? = nil, _ backgroundColor: UIColor? = nil) -> SwiftyLabel
-    {
-        return SwiftyLabel(text, textColor, backgroundColor)
-    }
+//    public final class func load(_ text: String? = nil, _ textColor: UIColor? = nil, _ backgroundColor: UIColor? = nil) -> SwiftyLabel
+//    {
+//        return SwiftyLabel(text, textColor, backgroundColor)
+//    }
 }
 
 extension SwiftyLabel
