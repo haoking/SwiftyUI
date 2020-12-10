@@ -91,7 +91,7 @@ public extension TextEditable where Self: UIView
     
     internal func overrideIntrinsicContentSize() -> CGSize
     {
-        if usesIntrinsicContentSize == true
+        if usesIntrinsicContentSize
         {
             guard let attributedText = mergedAttributedText else { return .zero }
             let size = CGSize(width: bounds.width, height: CGFloat.greatestFiniteMagnitude)

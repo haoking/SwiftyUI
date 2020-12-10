@@ -256,7 +256,7 @@ public final class SwiftyAlertView: UIViewController
         viewText.textColor = appearance.titleColor
         contentView.layer.borderColor = appearance.contentViewBorderColor.cgColor
         //Gesture Recognizer for tapping outside the textinput
-        if appearance.disableTapGesture == false
+        if !appearance.disableTapGesture
         {
             let tapGesture = UITapGestureRecognizer(target: self, action: #selector(SwiftyAlertView.tapped(_:)))
             tapGesture.numberOfTapsRequired = 1

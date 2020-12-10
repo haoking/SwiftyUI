@@ -155,7 +155,7 @@ public final class Promise<T>
     
     private final func fire()
     {
-        guard isError == false else {
+        guard !isError else {
             tasks.removeAll()
             return
         }

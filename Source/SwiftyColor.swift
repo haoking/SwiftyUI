@@ -192,11 +192,11 @@ public extension UIImage
         
         if let first = sortedColors.first { proposedEdgeColor = first }
         
-        if proposedEdgeColor.color.isBlackOrWhite == true && sortedColors.isEmpty == false
+        if proposedEdgeColor.color.isBlackOrWhite && !sortedColors.isEmpty
         {
           for countedColor in sortedColors where CGFloat(countedColor.count / proposedEdgeColor.count) > 0.3
           {
-            if countedColor.color.isBlackOrWhite == false
+            if !countedColor.color.isBlackOrWhite
             {
               proposedEdgeColor = countedColor
               break

@@ -94,7 +94,7 @@ public extension UIImage
     
     final func inflate()
     {
-        guard isInflated == false else { return }
+        guard !isInflated else { return }
         isInflated = true
         _ = cgImage?.dataProvider?.data
     }

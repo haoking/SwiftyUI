@@ -160,7 +160,7 @@ extension ImageCacheable
         var removed = false
         
         synchronizationQueue.sync {
-            if cachedImages.isEmpty == false
+            if !cachedImages.isEmpty
             {
                 cachedImages.removeAll()
                 currentMemoryUsage = 0

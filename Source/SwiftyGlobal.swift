@@ -55,6 +55,10 @@ public final class SwiftyGlobal
         case "iPhone12,3":                              return "iPhone 11 Pro"
         case "iPhone12,5":                              return "iPhone 11 Pro Max"
         case "iPhone12,8":                              return "iPhone SE (2nd generation)"
+        case "iPhone13,1":                              return "iPhone 12 mini"
+        case "iPhone13,2":                              return "iPhone 12"
+        case "iPhone13,3":                              return "iPhone 12 Pro"
+        case "iPhone13,4":                              return "iPhone 12 Pro Max"
         case "iPad2,1", "iPad2,2", "iPad2,3", "iPad2,4":return "iPad 2"
         case "iPad3,1", "iPad3,2", "iPad3,3":           return "iPad (3rd generation)"
         case "iPad3,4", "iPad3,5", "iPad3,6":           return "iPad (4th generation)"
@@ -177,7 +181,7 @@ extension NSObject
         guard let originalMethod = class_getInstanceMethod(self, originalSelector), let swizzledMethod = class_getInstanceMethod(self, swizzledSelector) else { return }
         
         let isAddMethod : Bool = class_addMethod(self, originalSelector, method_getImplementation(swizzledMethod), method_getTypeEncoding(swizzledMethod))
-        if isAddMethod == true
+        if isAddMethod
         {
             class_replaceMethod(self, swizzledSelector, method_getImplementation(originalMethod), method_getTypeEncoding(originalMethod))
         }
@@ -192,7 +196,7 @@ extension NSObject
         guard let swizzledClass = object_getClass(self), let originalMethod = class_getClassMethod(swizzledClass, originalSelector), let swizzledMethod = class_getClassMethod(swizzledClass, swizzledSelector) else { return }
         
         let isAddMethod : Bool = class_addMethod(swizzledClass, originalSelector, method_getImplementation(swizzledMethod), method_getTypeEncoding(swizzledMethod))
-        if isAddMethod == true
+        if isAddMethod
         {
             class_replaceMethod(swizzledClass, swizzledSelector, method_getImplementation(originalMethod), method_getTypeEncoding(originalMethod))
         }

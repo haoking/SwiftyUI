@@ -47,7 +47,7 @@ public final class SwiftyThreadPool
             let runLoopSource : CFRunLoopSource = CFRunLoopSourceCreate(kCFAllocatorDefault, 0, &context)
             let runLoop : CFRunLoop = RunLoop.current.getCFRunLoop()
             CFRunLoopAddSource(runLoop, runLoopSource, .defaultMode)
-            while Thread.current.isCancelled == false
+            while !Thread.current.isCancelled
             {
                 _ = autoreleasepool {
                     RunLoop.current.run(mode: RunLoop.Mode.default, before: Date.distantFuture)
@@ -88,7 +88,7 @@ public final class SwiftyThreadPool
     {
         var removed = false
         guard let queue = queue else { return removed }
-        if queue.operations.isEmpty == false
+        if !queue.operations.isEmpty
         {
             for (_, op) in queue.operations.enumerated().reversed()
             {

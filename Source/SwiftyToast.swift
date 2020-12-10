@@ -44,7 +44,7 @@ public final class SwiftyToast
         var width: CGFloat
         var height: CGFloat
         
-        if UIApplication.shared.statusBarOrientation.isPortrait == true
+        if UIApplication.shared.statusBarOrientation.isPortrait
         {
             width = containerSize.width
             height = containerSize.height
@@ -118,7 +118,7 @@ private final class SwiftyToastCenter
     
     public func fire()
     {
-        guard let toast = queueArray.first, isFinished == true else { return }
+        guard let toast = queueArray.first, isFinished else { return }
         queueArray.removeFirst()
         isFinished = false
         toast.show()
