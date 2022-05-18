@@ -6,7 +6,7 @@
 //  Copyright © 2017 Haochen Wang. All rights reserved.
 //
 
-import Foundation
+import UIKit
 
 public final class SwiftyThreadPool
 {

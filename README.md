@@ -1,4 +1,4 @@
-# SwiftyUI [![Awesome](https://cdn.rawgit.com/sindresorhus/awesome/d7305f38d29fed78fa85652e3a63e154dd8e8829/media/badge.svg)](https://github.com/sindresorhus/awesome) 
+# SwiftyUI [![Awesome](https://cdn.rawgit.com/sindresorhus/awesome/d7305f38d29fed78fa85652e3a63e154dd8e8829/media/badge.svg)](https://github.com/sindresorhus/awesome)
 
 ![Build Status](https://travis-ci.org/haoking/SwiftyUI.svg?branch=master) ![CocoaPods Compatible](https://img.shields.io/cocoapods/v/SwiftyUI.svg) ![Platform](https://img.shields.io/cocoapods/p/SwiftyUI.svg?style=flat) ![Swift 4.0+](https://img.shields.io/badge/Swift-4.0%2B-orange.svg)
 
@@ -25,9 +25,9 @@ High performance and lightweight UIView,  UIImage, UIImageView, UIlabel, UIButto
 
 ## Requirements
 
-- iOS 8.0+
-- Xcode 9.0+
-- Swift 5.0+
+- iOS 9.0+
+- Xcode 9.0+ (Swift Package Manager requires Xcode 11.0+)
+- Swift 4.2+
 
 ## Communication
 
@@ -36,6 +36,20 @@ High performance and lightweight UIView,  UIImage, UIImageView, UIlabel, UIButto
 - If you **want to contribute**, submit a pull request.
 
 ## Installation
+
+### Swift Package Manager
+
+[Swift Package Manager](https://swift.org/package-manager/) is a tool for managing the distribution of Swift code. It’s integrated with the Swift build system to automate the process of downloading, compiling, and linking dependencies.
+
+> Xcode 11.0+ is required.
+
+To integrate SwiftyUI into your Xcode project using Swift Package Manager, add it to the dependencies value of your `Package.swift`:
+
+```ruby
+dependencies: [
+    .package(url: "https://github.com/haoking/SwiftyUI.git", .upToNextMajor(from: "1.0.0"))
+]
+```
 
 ### CocoaPods
 
@@ -195,7 +209,7 @@ let myImageView : SwiftyImageView = SwiftyImageView(myImage).addTo(view)
 myImageView.frame = CGRect.init(x: 50, y: 150 + 20, width: 100, height: 100)
 
 let myTransition : SwiftyImageView.ImageTransition = .flipFromBottom(0.2)
-        
+
 myImageView.transition(myTransition, with: UIImage.load("aImage")!)
 ```
 
@@ -214,10 +228,10 @@ SwiftyButton is a better performance than UIButton and can be used like a standa
 
 ```swift
 let myBtn : SwiftyButton = SwiftyButton("Button", myImage, ClosureWrapper({ [weak self] (btn) in
-            
+
             guard let strongSelf = self, let btn = btn else { return }
             // do something
-                                                                                
+
 })).addTo(view)
 myBtn.frame = CGRect(x: 50, y: 450 + 20 + 20 + 20, width: 100, height: 100)
 ```

@@ -16,7 +16,7 @@ Pod::Spec.new do |s|
   #
 
   s.name         = "SwiftyUI"
-  s.version      = "1.7.0"
+  s.version      = "1.8.0"
   s.summary      = "High performance and lightweight UI."
 
   # This description is used to generate tags and improve search results.
@@ -68,7 +68,7 @@ Pod::Spec.new do |s|
   # s.platform     = :ios, "5.0"
 
   #  When using multiple platforms
-  s.ios.deployment_target = "8.0"
+  s.ios.deployment_target = "9.0"
   # s.osx.deployment_target = "10.7"
   # s.watchos.deployment_target = "2.0"
   # s.tvos.deployment_target = "9.0"
@@ -91,7 +91,7 @@ Pod::Spec.new do |s|
   #  Not including the public_header_files will make all headers public.
   #
 
-  s.source_files  = 'Source/*.swift'
+  s.source_files  = 'Sources/*.swift'
 
   # s.ios.deployment_target = '8.0'
   # s.ios.vendored_frameworks = 'SwiftyUI.framework'

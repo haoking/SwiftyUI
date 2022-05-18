@@ -8,7 +8,7 @@
 
 import UIKit
 
-public protocol ImageCacheable: class
+public protocol ImageCacheable: AnyObject
 {
     var memoryCapacity: UInt64 { get set }
     var preferredMemoryUsage: UInt64 { get set }

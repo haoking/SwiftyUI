@@ -62,7 +62,7 @@ public enum TextContentAlignment: Int {
     }
 }
 
-public protocol TextEditable: class
+public protocol TextEditable: AnyObject
 {
     var usesIntrinsicContentSize: Bool { get set }
     var textAlignment: TextContentAlignment { get set }

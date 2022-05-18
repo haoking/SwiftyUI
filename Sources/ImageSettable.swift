@@ -8,7 +8,7 @@
 
 import UIKit
 
-public protocol ImageSettable: class
+public protocol ImageSettable: AnyObject
 {
     var backgroundImage: UIImage? { get set }
 }
