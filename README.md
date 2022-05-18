@@ -43,7 +43,15 @@ High performance and lightweight UIView,  UIImage, UIImageView, UIlabel, UIButto
 
 > Xcode 11.0+ is required.
 
-To integrate SwiftyUI into your Xcode project using Swift Package Manager, add it to the dependencies value of your `Package.swift`:
+To integrate SwiftyUI into your Xcode project using Swift Package Manager
+
+Search Package Dependencies in PROJECT:
+
+```ruby
+SwiftyUI
+```
+
+Or, add it to the dependencies value of your `Package.swift`:
 
 ```ruby
 dependencies: [
