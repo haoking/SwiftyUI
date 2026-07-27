@@ -36,8 +36,7 @@ private struct PromiseTask {
     case .main:
       OperationQueue.main.addOperation(op)
     case .background:
-      // 拼写错误的 defalut 要到 Task 12 才改名,本 Task 保持现状
-      SwiftyThreadPool.defalut.add(op, withIdentifier: identifier)
+      SwiftyThreadPool.default.add(op, withIdentifier: identifier)
     }
   }
 }

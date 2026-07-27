@@ -78,8 +78,8 @@ final class SwiftyImageTests: XCTestCase {
 
     XCTAssertNotNil(UIImage.load(source, identifier: identifier))
 
-    XCTAssertNotNil(ImageCachePool.defalut.image(withIdentifier: identifier))
-    ImageCachePool.defalut.removeImage(withIdentifier: identifier)
+    XCTAssertNotNil(ImageCachePool.default.image(withIdentifier: identifier))
+    ImageCachePool.default.removeImage(withIdentifier: identifier)
   }
 
   // MARK: - load(_ name:) 三分支
@@ -90,7 +90,7 @@ final class SwiftyImageTests: XCTestCase {
     let identifier = "SwiftyImageTests.loadByName.hit.\(UUID().uuidString)"
     let source = TestSupport.makeSolidImage(color: .orange)
     _ = UIImage.load(source, identifier: identifier)
-    defer { ImageCachePool.defalut.removeImage(withIdentifier: identifier) }
+    defer { ImageCachePool.default.removeImage(withIdentifier: identifier) }
 
     XCTAssertNotNil(
       UIImage.load(identifier),
@@ -106,7 +106,7 @@ final class SwiftyImageTests: XCTestCase {
       UIImage.load(identifier),
       "缓存未命中且 asset 不存在时应返回 nil")
     XCTAssertNil(
-      ImageCachePool.defalut.image(withIdentifier: identifier),
+      ImageCachePool.default.image(withIdentifier: identifier),
       "查找失败不应把占位内容写入缓存")
   }
 

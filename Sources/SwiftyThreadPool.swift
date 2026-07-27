@@ -18,9 +18,15 @@ public final class SwiftyThreadPool: @unchecked Sendable {
     return result
   }
 
-  public static let defalut: SwiftyThreadPool = {
+  public static let `default`: SwiftyThreadPool = {
     return SwiftyThreadPool()
   }()
+
+  @available(
+    *, deprecated, renamed: "default",
+    message: "拼写错误,2.0 起改为 default。旧名将在下个大版本移除。"
+  )
+  public static var defalut: SwiftyThreadPool { `default` }
 
   // 保护 queue 这个可选变量本身。OperationQueue 自身线程安全,
   // 但 cancel() 会把它置 nil,与其他线程的读取构成竞争。

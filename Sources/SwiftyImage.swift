@@ -20,7 +20,7 @@ extension UIImage {
 
   public final class func load(_ name: String) -> UIImage? {
     // 真正需要保护的共享状态在 ImageCachePool 内部,由它自己加锁(见 Task 11)。
-    let imageCachePool: ImageCachePool = .defalut
+    let imageCachePool: ImageCachePool = .default
     if let cacheImage = imageCachePool.image(withIdentifier: name) {
       return cacheImage
     }
@@ -32,7 +32,7 @@ extension UIImage {
 
   public final class func load(_ aImage: UIImage?, identifier: String) -> UIImage? {
     guard let oriImage = aImage else { return nil }
-    let imageCachePool: ImageCachePool = .defalut
+    let imageCachePool: ImageCachePool = .default
     oriImage.inflate()
     imageCachePool.add(oriImage, withIdentifier: identifier)
     return oriImage
@@ -174,9 +174,15 @@ extension UIImage {
 }
 
 public final class ImageCachePool: ImageCacheable, @unchecked Sendable {
-  public static let `defalut`: ImageCachePool = {
+  public static let `default`: ImageCachePool = {
     return ImageCachePool()
   }()
+
+  @available(
+    *, deprecated, renamed: "default",
+    message: "拼写错误,2.0 起改为 default。旧名将在下个大版本移除。"
+  )
+  public static var defalut: ImageCachePool { `default` }
 
   // 一把锁保护下面全部状态。缓存操作的临界区都很短,
   // 比 1.x 的并发队列 + barrier/sync 混用既更快也更正确(B4/B5)。
