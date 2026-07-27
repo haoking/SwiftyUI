@@ -21,6 +21,16 @@ public class SwiftyLabel: UIView, TextEditable {
   private let layoutManager = NSLayoutManager()
 
   // MARK: - 存储属性
+  //
+  // 下面各 setter 中的 `if Thread.isMainThread { setNeedsDisplay() }` 是**临时**写法,
+  // 沿用自 1.x —— 当时这些属性可能从任意线程被设置。
+  //
+  // 本类型有意**不**标注 @MainActor:在 Swift 5 语言模式下,本模块内显式标注的
+  // @MainActor 会被强制执行,而 SwiftyButton 持有一个 SwiftyLabel 作为 titleLabel
+  // 并在其非隔离的 init 中访问它,此时标注会立即导致编译失败。
+  //
+  // Task 17 会为全部 UI 类型统一加上 @MainActor,届时这些守卫应当**一并删除**,
+  // 直接调用 setNeedsDisplay()。搜索 `Thread.isMainThread` 可定位全部 10 处。
 
   public var usesIntrinsicContentSize: Bool = true {
     didSet {
