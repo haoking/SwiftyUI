@@ -62,7 +62,7 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
 
   private var tasks: [PromiseTask] = []
   private var alwaysTasks: [PromiseTask] = []
-  private var errorBlock: ((Error) -> Void)?
+  private var errorBlock: (@Sendable (Error) -> Void)?
   private var isError: Bool = false
   private var isStarted: Bool = false
   private var isFinished: Bool = false
@@ -75,8 +75,11 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
   }
 
   private func markError(_ error: Error) {
-    // errorBlock 是用户代码,可能回头访问本 Promise,故取出后在临界区外调用
-    let handler: ((Error) -> Void)? = withState {
+    // errorBlock 是用户代码,可能回头访问本 Promise,故取出后在临界区外调用。
+    // 也正因为在临界区外,它跑在"出错的那个 operation 所在的线程"上
+    // (.background 时是 SwiftyThreadPool,.main 时是 OperationQueue.main),
+    // 所以 errorBlock 必须是 @Sendable 的 —— 详见 catch(_:) 的说明。
+    let handler: (@Sendable (Error) -> Void)? = withState {
       self.isError = true
       return self.errorBlock
     }
@@ -192,7 +195,14 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
   }
 
   /// 启动链条,并在出错时回调。
-  public func `catch`(_ errorBlock: ((Error) -> Void)? = nil) {
+  ///
+  /// - Important: `errorBlock` 在**抛出错误的那个任务所在的线程**上执行,
+  ///   而不是调用 `catch(_:)` 的线程 —— 因此它是 @Sendable(非隔离)的。
+  ///   在 @MainActor 上下文里写的闭包字面量会隐式带上主 actor 隔离,若不加这个
+  ///   标注,`promise.catch { self.label.text = ... }` 会被静默地放到后台线程执行,
+  ///   而调用点是同步的、不跨隔离,编译器无从察觉。要在错误处理里碰 UI,
+  ///   请自行跳回主 actor。
+  public func `catch`(_ errorBlock: (@Sendable (Error) -> Void)? = nil) {
     withState { self.errorBlock = errorBlock }
     beginIfNeeded()
   }

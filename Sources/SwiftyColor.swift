@@ -107,14 +107,24 @@ extension UIColor {
 }
 
 extension UIImage {
-  /// 在后台线程分析图片主色,完成后切回主线程回调。
+  /// 在后台线程分析图片主色,完成后**在主线程**回调。
   ///
-  /// `complete` 会被投递到另一个线程执行(取色在后台、回调在主队列),
-  /// 因此必须是 @Sendable 的。
+  /// `complete` 标注为 `@MainActor`:回调在主线程执行是本方法对外的承诺
+  /// (README 亦如此声明),标上之后这条承诺就能被类型系统表达,调用方可以
+  /// 直接在回调里碰 UI:
+  ///
+  /// ```swift
+  /// image.colors { bg, _, _, _ in
+  ///   self.view.backgroundColor = bg   // 无需任何桥接
+  /// }
+  /// ```
+  ///
+  /// 另标 `@Sendable`:闭包本身要从调用线程投递到取色链条上再传回主队列。
   public final func colors(
     _ complete: (
-      @Sendable (_ background: UIColor, _ primary: UIColor, _ secondary: UIColor, _ detail: UIColor)
-        -> Void
+      @MainActor @Sendable (
+        _ background: UIColor, _ primary: UIColor, _ secondary: UIColor, _ detail: UIColor
+      ) -> Void
     )?
   ) {
     Promise<(UIColor, UIColor, UIColor, UIColor)>.firstly { [weak self] (update, _) in
@@ -123,8 +133,15 @@ extension UIImage {
       update(strongSelf.getColors())
 
     }.then(on: .main) { (_, colors) in
-      if let complete = complete, let colors = colors {
-        complete(colors.0, colors.1, colors.2, colors.3)
+      // Promise 是非隔离的调度原语,它的任务闭包是 @Sendable 的;而 `on: .main`
+      // 保证这里确实跑在 OperationQueue.main 上。这一次 assumeIsolated 把该保证
+      // 收进库内、只审这一处,调用方因此拿到一个静态可用的 @MainActor 回调,
+      // 不必自己写桥接。性质同 SwiftyAlertView 中保留的那两处:
+      // 受检的、有文档的、只审一次的边界。
+      MainActor.assumeIsolated {
+        if let complete = complete, let colors = colors {
+          complete(colors.0, colors.1, colors.2, colors.3)
+        }
       }
     }.catch()
   }

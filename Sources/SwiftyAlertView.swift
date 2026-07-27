@@ -313,6 +313,9 @@ public final class SwiftyAlertView: UIViewController {
       }
     }
 
+    // FIXME(B20): 这里注册的是 keyboardWillShowNotification,但下方 block 的
+    // 逻辑(检查 keyboardHasBeenShown、恢复原 frame)是为 keyboardWillHide 写的。
+    // 属先前就存在的缺陷,Task 17 的纯语言模式迁移刻意未修以免夹带行为变更。
     NotificationCenter.default.addObserver(
       forName: UIResponder.keyboardWillShowNotification, object: nil, queue: nil
     ) { [weak self] (_) in
@@ -336,6 +339,10 @@ public final class SwiftyAlertView: UIViewController {
 
   public override func viewDidDisappear(_ animated: Bool) {
     super.viewDidDisappear(animated)
+    // FIXME(B21): removeObserver(self, name:) 对以 block 形式注册的观察者是空操作
+    // ——观察者由 addObserver 返回的 token 代表,self 从未被注册。
+    // 故两个键盘观察者在 viewDidDisappear 后仍然存活并持续触发。
+    // 属先前就存在的缺陷,Task 17 刻意未修,见 B20。
     NotificationCenter.default.removeObserver(
       self, name: UIResponder.keyboardWillShowNotification, object: nil)
     NotificationCenter.default.removeObserver(
