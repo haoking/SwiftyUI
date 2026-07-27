@@ -96,26 +96,4 @@ extension NSObject {
       method_exchangeImplementations(originalMethod, swizzledMethod)
     }
   }
-
-  /// 交换类方法实现。同上,2.0 起不再公开。
-  ///
-  /// 当前仓库内已无调用方(SwiftyButton 的 swizzle 已在 Task 14 移除)。
-  /// 是否继续保留交由最终审查裁定 —— 未删除,仅收紧可见性。
-  final class func swizzleStatic(_ originalSelector: Selector, _ swizzledSelector: Selector) {
-    guard let swizzledClass = object_getClass(self),
-      let originalMethod = class_getClassMethod(swizzledClass, originalSelector),
-      let swizzledMethod = class_getClassMethod(swizzledClass, swizzledSelector)
-    else { return }
-
-    let isAddMethod: Bool = class_addMethod(
-      swizzledClass, originalSelector, method_getImplementation(swizzledMethod),
-      method_getTypeEncoding(swizzledMethod))
-    if isAddMethod {
-      class_replaceMethod(
-        swizzledClass, swizzledSelector, method_getImplementation(originalMethod),
-        method_getTypeEncoding(originalMethod))
-    } else {
-      method_exchangeImplementations(originalMethod, swizzledMethod)
-    }
-  }
 }

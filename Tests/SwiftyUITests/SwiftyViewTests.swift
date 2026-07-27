@@ -11,6 +11,11 @@ final class SwiftyViewTests: XCTestCase {
     XCTAssertEqual(view.backgroundColor, .clear)
     XCTAssertFalse(view.isHidden)
     XCTAssertEqual(view.alpha, 1.0)
+
+    // init 在 super.init 之后设置 backgroundColor = .clear,属于 Swift 初始化的
+    // 第二阶段,didSet 观察器必然触发。.clear 的 alpha 为 0,故 isOpaque 应为 false。
+    // 这条断言保护的是"观察器确实跨 init 边界生效"这一前提。
+    XCTAssertFalse(view.isOpaque, "init 中的 backgroundColor 赋值应触发观察器并重算 isOpaque")
   }
 
   /// SwiftyView 自身维护 isOpaque,不依赖全局 swizzle。
@@ -38,15 +43,23 @@ final class SwiftyViewTests: XCTestCase {
     XCTAssertTrue(view.isOpaque)
   }
 
-  /// B15:未显式开启全局优化时,普通 UIView 不应被改写行为。
+  /// B15:未显式开启全局优化时,库不应改写普通 UIView 的 isOpaque。
+  ///
+  /// 判别力的关键是用**半透明**背景色:UIView 的 isOpaque 系统默认为 true
+  /// 且不随 backgroundColor 变化。若全局 swizzle 被意外装上,它会被重算为 false。
+  /// 用不透明色(如 .red)则无判别力 —— 那种情况下重算结果同样是 true。
   func testPlainUIViewIsUnaffectedByDefault() {
     let plain = UIView()
-    plain.backgroundColor = .red
-    // 系统默认 isOpaque 为 true,但不应因 backgroundColor 变化而被库改写。
-    // 这里断言的是"addTo 不再产生副作用"。
+    plain.backgroundColor = UIColor.red.withAlphaComponent(0.5)
+    XCTAssertTrue(
+      plain.isOpaque,
+      "未开启全局优化时,普通 UIView 的 isOpaque 应保持系统默认值 true,不因半透明背景被重算")
+
+    // addTo 也不应有任何副作用(1.x 在此惰性装载全局 swizzle)
     let container = UIView()
     plain.addTo(container)
     XCTAssertTrue(container.subviews.contains(plain))
+    XCTAssertTrue(plain.isOpaque, "addTo 不应触发任何 isOpaque 重算")
   }
 
   func testAddToReturnsSelfForChaining() {
