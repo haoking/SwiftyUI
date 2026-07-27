@@ -34,7 +34,7 @@ SwiftyUI 是一个 iOS 高性能轻量 UI 基础库,最后一次提交在 2022-0
 
 ### 2.1 目标
 
-1. 修复全部 18 个已定位的 bug(P0 崩溃与数据竞争 8 个、P1 语义错误 6 个、P2 设计缺陷 4 个)
+1. 修复全部 19 个已定位的 bug(P0 崩溃与数据竞争 9 个、P1 语义错误 6 个、P2 设计缺陷 4 个;其中 B19 于计划阶段追加,见 §4.4)
 2. 部署目标提升至 iOS 15.0,替换所有废弃 API
 3. 迁移到 Swift 6 语言模式,`swiftLanguageModes: [.v6]` 下零错误零告警
 4. 建立真实的单元测试,覆盖全部纯逻辑模块及每一条 bug 的回归
@@ -217,6 +217,28 @@ lock.unlock()
 两处 `deinit` 都调用 `NotificationCenter.default.removeObserver(self)`,但观察者是用基于 block 的 `addObserver(forName:object:queue:using:)` 注册的——该 API 返回一个 token 作为观察者,`self` 从未被注册,因此这行代码不移除任何东西。
 
 **实际影响为零**:两者都是永不销毁的单例,`deinit` 不会执行。仅作为正确性修复列出,**不为其编写回归测试**(单例的 `deinit` 无法在测试中触发)。修复:持有 `addObserver` 返回的 token 并在 `deinit` 中移除它。
+
+### 4.4 计划阶段追加
+
+**B19. `SwiftyColor.swift:31-43` — `UIColor.hex(String)` 对非法字符崩溃**
+
+本条在编写实施计划、为 hex 解析设计测试用例时发现,不在最初的 §4.1–4.3 清单中。归类为 P0(崩溃)。
+
+```swift
+    final class func hex(_ hexString: String, _ alpha: CGFloat = 1.0) -> UIColor
+    {
+        var hex : String = hexString.hasPrefix("#") ? String(hexString.dropFirst()) : hexString
+        guard hex.count == 3 || hex.count == 6 else { return UIColor(white: 1.0, alpha: 0.0) }
+        if hex.count == 3 { /* 逐字符展开为 6 位 */ }
+        return .hex(UInt(hex, radix: 16)!, alpha)   // ← 强解包
+    }
+```
+
+`guard` 只校验长度,不校验字符。`hex("zzz")` 长度合法,展开成 `"zzzzzz"` 后 `UInt(_:radix: 16)` 返回 `nil`,强解包崩溃。任何把用户输入或配置文件内容直接传入的调用方都会踩到。
+
+修复:把强解包改为 `guard let`,解析失败时与长度非法时保持一致,返回全透明白色。
+
+**bug 总数由 18 增至 19**(P0 由 8 增至 9)。§2.1、§7、§10 中提及的数量与覆盖范围相应包含本条。
 
 ## 5. 架构调整
 
