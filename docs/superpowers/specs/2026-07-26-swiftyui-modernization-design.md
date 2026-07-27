@@ -115,9 +115,27 @@ let sortComparator: (CountedColor, CountedColor) -> Bool = { (a, b) -> Bool in
 
 `sort(by:)` 要求谓词是严格弱序,传入 `<=` 属未定义行为。修复:改为 `<`(方向见 4.2 B12 的说明)。
 
-**B7. `SwiftyPromise.swift:59,61` — 跨线程无同步状态**
+**B7. `SwiftyPromise.swift:59,61,156-165` — 跨线程无同步状态(崩溃级)**
 
-`isError` 和 `value` 由运行在线程池上的多个 operation 读写,无任何同步。修复:见 5.4。
+`isError` 和 `value` 由运行在线程池上的多个 operation 读写,无任何同步。
+
+**实测严重程度高于最初编目。** Task 5 编写基线测试时发现,真正的问题不止于读到陈旧值,而是 `fire()` 本身:
+
+```swift
+private final func fire()
+{
+    guard !isError else { tasks.removeAll(); return }
+    guard let task = tasks.first else { return }   // ← 读
+    task.start()                                    // ← 投递
+    tasks.removeFirst()                             // ← 移除
+}
+```
+
+三步之间无同步。两个线程并发进入时会读到同一个 `tasks.first` 并各自 `start()` 一次,把**同一个 `Operation` 二次投递给 `OperationQueue`**,触发未捕获的 `NSException`,使整个进程崩溃。实测在普通链式调用下约 1/4~1/3 概率复现,隔离运行同样触发。
+
+因此 `SwiftyPromiseTests` 在 Task 7 修复前以 `XCTSkip` 整类跳过——否则 Tasks 6–21 的每一次全量回归都会随机崩溃而不可信。
+
+修复:见 5.4(串行队列保护全部状态,`fire()` 的读-取-移除在同一临界区内完成)。
 
 **B8. `SwiftyToast.swift:97-98` — `SwiftyToastCenter` 状态无同步**
 
