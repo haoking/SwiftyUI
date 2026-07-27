@@ -120,4 +120,35 @@ extension SwiftyColorTests {
     wait(for: [done], timeout: 10.0)
     XCTAssertTrue(wasMainThread, "colors 的回调必须在主线程")
   }
+
+  /// 排序方向的判别性基线。
+  ///
+  /// 与 testImageColorsBaseline 不同,本夹具能真正区分升序/降序:
+  /// 边缘采样条带内深蓝占 70%、深红占 30%,若排序为降序则背景色应为深蓝
+  /// (出现最多),若为升序则为深红(出现最少)。
+  /// 本测试只记录当前输出,Task 8 据此裁决 B12 的排序方向。
+  func testImageColorsSortDirectionBaseline() {
+    let image = TestSupport.makeEdgeDiscriminatingImage(
+      majorityEdge: UIColor(red: 0, green: 0, blue: 0.55, alpha: 1),
+      minorityEdge: UIColor(red: 0.55, green: 0, blue: 0, alpha: 1),
+      body: UIColor(red: 1, green: 1, blue: 0.6, alpha: 1)
+    )
+    let done = expectation(description: "colors 回调")
+    var background: UIColor?
+    var primary: UIColor?
+    image.colors { bg, pri, _, _ in
+      background = bg
+      primary = pri
+      done.fulfill()
+    }
+    wait(for: [done], timeout: 10.0)
+
+    let bg = try! XCTUnwrap(background)
+    let pri = try! XCTUnwrap(primary)
+    print("BASELINE-SORT background = R\(bg.redValue) G\(bg.greenValue) B\(bg.blueValue)")
+    print("BASELINE-SORT primary    = R\(pri.redValue) G\(pri.greenValue) B\(pri.blueValue)")
+
+    XCTAssertNotNil(background)
+    XCTAssertNotNil(primary)
+  }
 }
