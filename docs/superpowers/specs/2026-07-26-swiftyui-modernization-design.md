@@ -355,7 +355,7 @@ public enum SwiftyUI {
 }
 ```
 
-- `NSObject.swizzleInstance` / `swizzleStatic` 由 `public` 降为 `internal`——这两个方法当前是公开 API,但属于实现细节
+- `NSObject.swizzleInstance` 由 `public` 降为 `internal`;`swizzleStatic` 零调用者,直接删除——这两个方法当前是公开 API,但属于实现细节
 
 ### 5.6 `ImageSettable`
 
