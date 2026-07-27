@@ -33,7 +33,10 @@ extension UIColor {
         hex.insert(char, at: hex.index(hex.startIndex, offsetBy: index * 2))
       }
     }
-    return .hex(UInt(hex, radix: 16)!, alpha)
+    // 长度合法不代表字符合法:"zzz" 会展开成 "zzzzzz",UInt(_:radix:) 返回 nil。
+    // 原实现在此处强解包导致崩溃(B19)。
+    guard let value = UInt(hex, radix: 16) else { return UIColor(white: 1.0, alpha: 0.0) }
+    return .hex(value, alpha)
   }
 }
 
@@ -56,16 +59,16 @@ extension UIColor {
     }
   }
 
-  fileprivate final var isDark: Bool {
+  internal final var isDark: Bool {
     return (0.2126 * redValue + 0.7152 * greenValue + 0.0722 * blueValue) < 0.5
   }
 
-  fileprivate final var isBlackOrWhite: Bool {
+  internal final var isBlackOrWhite: Bool {
     return (redValue > 0.91 && greenValue > 0.91 && blueValue > 0.91)
       || (redValue < 0.09 && greenValue < 0.09 && blueValue < 0.09)
   }
 
-  fileprivate final func color(minSaturation: CGFloat) -> UIColor {
+  internal final func color(minSaturation: CGFloat) -> UIColor {
     var (hue, saturation, brightness, alpha): (CGFloat, CGFloat, CGFloat, CGFloat) = (
       0.0, 0.0, 0.0, 0.0
     )
@@ -75,23 +78,24 @@ extension UIColor {
       ? UIColor(hue: hue, saturation: minSaturation, brightness: brightness, alpha: alpha) : self
   }
 
-  fileprivate final func isDistinct(from color: UIColor) -> Bool {
+  internal final func isDistinct(from color: UIColor) -> Bool {
     let threshold: CGFloat = 0.25
-    var result: Bool = false
 
-    if abs(redValue - color.redValue) > threshold || abs(greenValue - color.greenValue) > threshold
-      || abs(blueValue - color.blueValue) > threshold
-    {
-      if abs(redValue - greenValue) < 0.03 && abs(redValue - blueValue) < 0.03 {
-        if abs(color.redValue - color.greenValue) < 0.03
-          && abs(color.redValue - color.blueValue) < 0.03
-        {
-          result = false
-        }
-      }
-      result = true
-    }
-    return result
+    guard
+      abs(redValue - color.redValue) > threshold
+        || abs(greenValue - color.greenValue) > threshold
+        || abs(blueValue - color.blueValue) > threshold
+    else { return false }
+
+    // 两个颜色都接近灰度时,通道差异不足以说明它们"可区分"。
+    // 原实现在此处赋 result = false 后又被无条件的 result = true 覆盖,
+    // 整个判断形同虚设(B13)。
+    let selfIsNearGray = abs(redValue - greenValue) < 0.03 && abs(redValue - blueValue) < 0.03
+    let otherIsNearGray =
+      abs(color.redValue - color.greenValue) < 0.03 && abs(color.redValue - color.blueValue) < 0.03
+    if selfIsNearGray && otherIsNearGray { return false }
+
+    return true
   }
 
   fileprivate final func isContrasting(with color: UIColor) -> Bool {
@@ -157,8 +161,11 @@ extension UIImage {
     let imageBackgroundColors: NSCountedSet = NSCountedSet(capacity: height)
     let imageColors: NSCountedSet = NSCountedSet(capacity: width * height)
 
+    // B6: sort(by:) 要求严格弱序,原实现传 <= 属未定义行为。
+    // B12(排序方向): 该算法要把"出现次数最多"的边缘色当作背景色,
+    //                 因此这里必须是降序,取 .first 得到最常见的颜色。
     let sortComparator: (CountedColor, CountedColor) -> Bool = { (a, b) -> Bool in
-      return a.count <= b.count
+      return a.count > b.count
     }
 
     for x in 0..<width {
@@ -191,8 +198,10 @@ extension UIImage {
     if let first = sortedColors.first { proposedEdgeColor = first }
 
     if proposedEdgeColor.color.isBlackOrWhite && !sortedColors.isEmpty {
+      // B12: 原实现写作 CGFloat(countedColor.count / proposedEdgeColor.count),
+      //      先做整数除法再转 CGFloat,结果非 0 即 >= 1,0.3 这个阈值形同虚设。
       for countedColor in sortedColors
-      where CGFloat(countedColor.count / proposedEdgeColor.count) > 0.3 {
+      where CGFloat(countedColor.count) / CGFloat(proposedEdgeColor.count) > 0.3 {
         if !countedColor.color.isBlackOrWhite {
           proposedEdgeColor = countedColor
           break
