@@ -11,55 +11,31 @@ import UIKit
 
 extension UIImage {
   public final class func load(_ data: Data) -> UIImage? {
-    var image: UIImage?
-    let lock = NSLock()
-    lock.lock()
-    image = UIImage(data: data)
-    lock.unlock()
-    return image
+    return UIImage(data: data)
   }
 
   public final class func load(_ data: Data, scale: CGFloat) -> UIImage? {
-    var image: UIImage?
-    let lock = NSLock()
-    lock.lock()
-    image = UIImage(data: data, scale: scale)
-    lock.unlock()
-    return image
+    return UIImage(data: data, scale: scale)
   }
 
   public final class func load(_ name: String) -> UIImage? {
-    var image: UIImage?
-    let lock = NSLock()
-    lock.lock()
-
+    // 真正需要保护的共享状态在 ImageCachePool 内部,由它自己加锁(见 Task 11)。
     let imageCachePool: ImageCachePool = .defalut
     if let cacheImage = imageCachePool.image(withIdentifier: name) {
-      image = cacheImage
-    } else if let oriImage = UIImage(named: name) {
-      oriImage.inflate()
-      imageCachePool.add(oriImage, withIdentifier: name)
-      image = oriImage
+      return cacheImage
     }
-
-    lock.unlock()
-    return image
+    guard let oriImage = UIImage(named: name) else { return nil }
+    oriImage.inflate()
+    imageCachePool.add(oriImage, withIdentifier: name)
+    return oriImage
   }
 
   public final class func load(_ aImage: UIImage?, identifier: String) -> UIImage? {
-    var image: UIImage?
-    let lock = NSLock()
-    lock.lock()
-
+    guard let oriImage = aImage else { return nil }
     let imageCachePool: ImageCachePool = .defalut
-    if let oriImage = aImage {
-      oriImage.inflate()
-      imageCachePool.add(oriImage, withIdentifier: identifier)
-      image = oriImage
-    }
-
-    lock.unlock()
-    return image
+    oriImage.inflate()
+    imageCachePool.add(oriImage, withIdentifier: identifier)
+    return oriImage
   }
 }
 
@@ -202,9 +178,12 @@ public final class ImageCachePool: ImageCacheable {
     return ImageCachePool()
   }()
 
+  // block 形式注册的观察者由返回的 token 代表,removeObserver(self) 不生效(B18)
+  private var memoryWarningObserver: (any NSObjectProtocol)?
+
   // internal 以便单元测试构造独立实例。对外仍只暴露静态单例访问器。
   init() {
-    NotificationCenter.default.addObserver(
+    memoryWarningObserver = NotificationCenter.default.addObserver(
       forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: nil
     ) { [weak self] (_) in
 
@@ -214,6 +193,8 @@ public final class ImageCachePool: ImageCacheable {
   }
 
   deinit {
-    NotificationCenter.default.removeObserver(self)
+    if let observer = memoryWarningObserver {
+      NotificationCenter.default.removeObserver(observer)
+    }
   }
 }
