@@ -69,31 +69,40 @@ final class SwiftyThreadPoolTests: XCTestCase {
     XCTAssertFalse(pool.remove(withIdentifier: "no-such-operation"))
   }
 
-  // MARK: - 待修复行为的基线
+  // MARK: - B9 / B10 回归
 
-  /// B9:常驻 RunLoop 的 environment operation 应当在 init 时入队,
-  /// 但当前实现在 `self.queue = queue` 之前就调用了 add,导致它从未入队。
-  ///
-  /// 当前(错误)行为:查不到该 operation。Task 6 会把断言翻转为 XCTAssertNotNil。
-  func testEnvironmentOperationIsMissing_currentBuggyBehavior() {
-    XCTAssertNil(
+  /// B9:常驻 RunLoop 的 environment operation 必须在 init 时真正入队。
+  func testEnvironmentOperationIsEnqueued() {
+    XCTAssertNotNil(
       pool.operation(withIdentifier: "me.haoking.environmentOperation"),
-      "若此断言失败,说明 B9 已被修复,请改用 Task 6 中的正确断言"
+      "常驻 RunLoop operation 应在 init 时入队(B9)"
     )
   }
 
-  /// B10:stop() 与 restart() 的实现颠倒了。
-  /// stop() 本应挂起队列(isSuspended = true),当前却设为 false。
-  ///
-  /// 当前(错误)行为:调用 stop() 之后,新加入的 operation 仍然会执行。
-  /// Task 6 会把断言翻转。
-  func testStopDoesNotActuallyStop_currentBuggyBehavior() {
+  /// B10:stop() 必须真的挂起队列。
+  func testStopSuspendsQueue() {
+    pool.stop()
+    XCTAssertTrue(pool.isSuspended)
+
+    var ran = false
+    pool.add(BlockOperation { ran = true })
+
+    let settle = expectation(description: "settle")
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { settle.fulfill() }
+    wait(for: [settle], timeout: 3.0)
+
+    XCTAssertFalse(ran, "stop() 之后新加入的 operation 不应执行(B10)")
+  }
+
+  /// B10:restart() 必须恢复队列,并让挂起期间积压的 operation 跑起来。
+  func testRestartResumesQueue() {
     pool.stop()
 
-    let ran = expectation(description: "stop 之后 operation 仍然执行了")
+    let ran = expectation(description: "restart 之后积压任务执行")
     pool.add(BlockOperation { ran.fulfill() })
 
+    pool.restart()
+    XCTAssertFalse(pool.isSuspended)
     wait(for: [ran], timeout: 5.0)
-    // 能走到这里就说明 stop() 没有真的停住队列 —— 这正是 B10
   }
 }
