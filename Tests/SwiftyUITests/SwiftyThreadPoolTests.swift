@@ -84,14 +84,13 @@ final class SwiftyThreadPoolTests: XCTestCase {
     pool.stop()
     XCTAssertTrue(pool.isSuspended)
 
-    var ran = false
-    pool.add(BlockOperation { ran = true })
-
-    let settle = expectation(description: "settle")
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { settle.fulfill() }
-    wait(for: [settle], timeout: 3.0)
-
-    XCTAssertFalse(ran, "stop() 之后新加入的 operation 不应执行(B10)")
+    // 用反向 expectation 而不是捕获一个 `var ran`:后者会在 operation 所在线程
+    // 写、在测试线程读,本身就是数据竞争(严格并发检查会直接报出来)。
+    // isInverted 的语义完全等价:0.5 秒内一旦执行就失败。
+    let ran = expectation(description: "stop() 之后新加入的 operation 不应执行(B10)")
+    ran.isInverted = true
+    pool.add(BlockOperation { ran.fulfill() })
+    wait(for: [ran], timeout: 0.5)
   }
 
   /// B10:restart() 必须恢复队列,并让挂起期间积压的 operation 跑起来。

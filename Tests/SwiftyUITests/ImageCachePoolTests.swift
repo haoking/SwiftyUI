@@ -69,14 +69,17 @@ final class ImageCachePoolTests: XCTestCase {
     let image = TestSupport.makeSolidImage(color: .red, size: CGSize(width: 8, height: 8))
     let perImageBytes: UInt64 = 8 * 8 * 4  // 256
 
+    // 取出局部引用后再进并发块:XCTestCase 自身不是 Sendable,捕获 self
+    // 会被严格并发检查拒绝;ImageCachePool 是 @unchecked Sendable,可直接捕获。
+    let cache = self.cache!
     DispatchQueue.concurrentPerform(iterations: 200) { index in
       let key = "concurrent-\(index % 20)"
       if index % 3 == 0 {
-        self.cache.removeImage(withIdentifier: key)
+        cache.removeImage(withIdentifier: key)
       } else {
-        self.cache.add(image, withIdentifier: key)
+        cache.add(image, withIdentifier: key)
       }
-      _ = self.cache.image(withIdentifier: key)
+      _ = cache.image(withIdentifier: key)
     }
 
     // 遍历全部可能的 key,独立数出实际驻留的条目数,

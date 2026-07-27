@@ -8,7 +8,7 @@
 
 import UIKit
 
-/// 未标注 @MainActor 的说明见 `ImageSettable` 的协议文档注释。
+@MainActor
 public class SwiftyButton: UIControl, ImageSettable {
   public lazy var titleLabel: SwiftyLabel = { [unowned self] in
     let titleLabel = SwiftyLabel(nil, .black, .clear)

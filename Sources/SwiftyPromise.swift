@@ -49,7 +49,14 @@ private enum PromiseNext {
   case nothing
 }
 
-public final class Promise<T> {
+/// 一条可链式组合的异步任务链。
+///
+/// - `T: Sendable`:链条会把 T 在线程之间搬运(某个任务里 `update(...)` 写入,
+///   后续任务可能在另一个线程读出),因此 T 必须能安全跨线程。
+/// - `@unchecked Sendable`:下方全部可变状态一律经 `withState`(即
+///   `stateQueue.sync`)读写,线程安全由这把串行队列保证 —— 编译器无法验证
+///   这一点,故为 unchecked。与 ImageCachePool、SwiftyThreadPool 同一模式。
+public final class Promise<T: Sendable>: @unchecked Sendable {
   /// 保护下方全部可变状态。所有临界区都很短,串行队列足够,不需要更复杂的方案。
   private let stateQueue = DispatchQueue(label: "me.haoking.SwiftyPromise.state")
 
@@ -86,7 +93,7 @@ public final class Promise<T> {
 
   // MARK: - 任务构建
 
-  private func operationBuild(_ work: (() throws -> Void)?) -> Operation {
+  private func operationBuild(_ work: (@Sendable () throws -> Void)?) -> Operation {
     // 这里不持有 self:链条运行期间的强引用由 fire() 在投递时挂到
     // operation 的 completionBlock 上,详见 fire()
     return BlockOperation { [weak self] in
@@ -100,7 +107,7 @@ public final class Promise<T> {
   }
 
   private func operationBuildT(
-    _ work: @escaping (_ update: (T?) -> Void, _ value: T?) throws -> Void
+    _ work: @escaping @Sendable (_ update: (T?) -> Void, _ value: T?) throws -> Void
   ) -> Operation {
     return BlockOperation { [weak self] in
       guard let self = self else { return }
@@ -117,14 +124,14 @@ public final class Promise<T> {
   // init 期间还没有第二个线程能看到 self,直接写 tasks 是安全的
   private init(
     _ identifier: String? = nil, _ perform: ThreadPerform = .background,
-    _ work: (() throws -> Void)?
+    _ work: (@Sendable () throws -> Void)?
   ) {
     tasks.append(.create(identifier, perform, operationBuild(work)))
   }
 
   private init(
     _ identifier: String? = nil, _ perform: ThreadPerform = .background,
-    work: @escaping (_ update: (T?) -> Void, _ value: T?) throws -> Void
+    work: @escaping @Sendable (_ update: (T?) -> Void, _ value: T?) throws -> Void
   ) {
     tasks.append(.create(identifier, perform, operationBuildT(work)))
   }
@@ -132,7 +139,7 @@ public final class Promise<T> {
   @discardableResult
   public class func firstly(
     with identifier: String? = nil, on perform: ThreadPerform = .background,
-    _ work: (() throws -> Void)?
+    _ work: (@Sendable () throws -> Void)?
   ) -> Promise {
     return Promise(identifier, perform, work)
   }
@@ -140,7 +147,7 @@ public final class Promise<T> {
   @discardableResult
   public class func firstly(
     with identifier: String? = nil, on perform: ThreadPerform = .background,
-    work: @escaping (_ update: (T?) -> Void, _ value: T?) throws -> Void
+    work: @escaping @Sendable (_ update: (T?) -> Void, _ value: T?) throws -> Void
   ) -> Promise {
     return Promise(identifier, perform, work: work)
   }
@@ -150,7 +157,7 @@ public final class Promise<T> {
   @discardableResult
   public func then(
     with identifier: String? = nil, on perform: ThreadPerform = .background,
-    _ work: (() throws -> Void)?
+    _ work: (@Sendable () throws -> Void)?
   ) -> Promise {
     withState { tasks.append(.create(identifier, perform, operationBuild(work))) }
     return self
@@ -159,7 +166,7 @@ public final class Promise<T> {
   @discardableResult
   public func then(
     with identifier: String? = nil, on perform: ThreadPerform = .background,
-    work: @escaping (_ update: (T?) -> Void, _ value: T?) throws -> Void
+    work: @escaping @Sendable (_ update: (T?) -> Void, _ value: T?) throws -> Void
   ) -> Promise {
     withState { tasks.append(.create(identifier, perform, operationBuildT(work))) }
     return self
@@ -168,7 +175,7 @@ public final class Promise<T> {
   @discardableResult
   public func always(
     with identifier: String? = nil, on perform: ThreadPerform = .background,
-    _ work: (() throws -> Void)?
+    _ work: (@Sendable () throws -> Void)?
   ) -> Promise {
     // always 的 operation 不参与 fire() 链条,完成后无需推进;
     // 此时链条已终结,再抛错也无处可去,直接吞掉

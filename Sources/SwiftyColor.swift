@@ -107,9 +107,14 @@ extension UIColor {
 }
 
 extension UIImage {
+  /// 在后台线程分析图片主色,完成后切回主线程回调。
+  ///
+  /// `complete` 会被投递到另一个线程执行(取色在后台、回调在主队列),
+  /// 因此必须是 @Sendable 的。
   public final func colors(
     _ complete: (
-      (_ background: UIColor, _ primary: UIColor, _ secondary: UIColor, _ detail: UIColor) -> Void
+      @Sendable (_ background: UIColor, _ primary: UIColor, _ secondary: UIColor, _ detail: UIColor)
+        -> Void
     )?
   ) {
     Promise<(UIColor, UIColor, UIColor, UIColor)>.firstly { [weak self] (update, _) in

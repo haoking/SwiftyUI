@@ -62,3 +62,31 @@ enum TestSupport {
     }
   }
 }
+
+/// 线程安全的单值容器,供测试从异步回调里回传结果。
+///
+/// 库里跨线程投递的回调(Promise 的任务闭包、UIImage.colors 的 complete)
+/// 都是 @Sendable 的,直接捕获并改写一个局部 `var` 是真实的数据竞争
+/// ——回调线程写、测试线程在 wait 之后读——严格并发检查会拒绝。
+/// 加锁后语义不变,断言仍然成立。
+final class Box<Value: Sendable>: @unchecked Sendable {
+  private let lock = NSLock()
+  private var storage: Value
+
+  init(_ initial: Value) {
+    storage = initial
+  }
+
+  var value: Value {
+    get {
+      lock.lock()
+      defer { lock.unlock() }
+      return storage
+    }
+    set {
+      lock.lock()
+      defer { lock.unlock() }
+      storage = newValue
+    }
+  }
+}

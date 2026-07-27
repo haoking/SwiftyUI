@@ -9,10 +9,7 @@
 import UIKit
 
 /// 轻量视图基类:自动维护 isOpaque,减少离屏混合。
-///
-/// SwiftyView 与本文件中的 UIView 扩展有意不标注 @MainActor —— 原因见
-/// SwiftyLabel.swift 中"存储属性"一节的说明,Task 17 会统一为全部 UI 类型
-/// 加上隔离标注。
+@MainActor
 public class SwiftyView: UIView {
   public init() {
     super.init(frame: .zero)

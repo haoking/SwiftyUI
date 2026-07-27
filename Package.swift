@@ -16,13 +16,10 @@ let package = Package(
   targets: [
     .target(
       name: "SwiftyUI",
-      path: "Sources",
-      // Task 17 会移除这一行,切换到 tools 6.0 默认的 Swift 6 语言模式
-      swiftSettings: [.swiftLanguageMode(.v5)]),
+      path: "Sources"),
     .testTarget(
       name: "SwiftyUITests",
       dependencies: ["SwiftyUI"],
-      path: "Tests/SwiftyUITests",
-      swiftSettings: [.swiftLanguageMode(.v5)]),
+      path: "Tests/SwiftyUITests"),
   ]
 )

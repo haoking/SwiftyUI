@@ -8,12 +8,14 @@
 
 import UIKit
 
+@MainActor
 open class SwiftyAlertButton: UIButton {
   var action: (() -> Void)!
 }
 
 // Allow alerts to be closed/renamed in a chainable manner
 // Example: SwiftyAlertView().showSuccess(self, title: "Test", subTitle: "Value").close()
+@MainActor
 public final class SwiftyAlertViewResponder {
   let alertview: SwiftyAlertView
 
@@ -46,10 +48,7 @@ private let uniqueAccessibilityIdentifier: String = "SwiftyAlert"
 //public typealias DismissBlock = () -> Void
 
 // The Main Class
-//
-// 未标注 @MainActor 的说明见 SwiftyLabel.swift"存储属性"一节;本类型与
-// SwiftyAlertButton、SwiftyAlertViewResponder(同文件)一样,隔离标注
-// 统一推迟到 Task 17。
+@MainActor
 public final class SwiftyAlertView: UIViewController {
 
   var appearance: SwiftyAppearance!
@@ -155,11 +154,7 @@ public final class SwiftyAlertView: UIViewController {
 
   override public func viewWillLayoutSubviews() {
     super.viewWillLayoutSubviews()
-    // SwiftyGlobal 是 @MainActor 隔离的,而 SwiftyAlertView 本身不是——隔离标注
-    // 统一推迟到 Task 17(见 SwiftyLabel.swift"存储属性"一节的说明)。UIKit
-    // 保证 viewWillLayoutSubviews 只在主线程调用,故此处 assumeIsolated 不会
-    // trap;Task 17 加上 @MainActor 后,本桥接可整体删除。
-    guard let rv = MainActor.assumeIsolated({ SwiftyGlobal.keyWindow }) else { return }
+    guard let rv = SwiftyGlobal.keyWindow else { return }
     let sz = rv.frame.size
 
     // Set background frame
@@ -274,57 +269,68 @@ public final class SwiftyAlertView: UIViewController {
   var tmpCircleViewFrameOrigin: CGPoint?
   var keyboardHasBeenShown: Bool = false
 
+  // 下面两处 MainActor.assumeIsolated **不是**过渡代码,不要当成 2.0 迁移期
+  // 遗留的桥接顺手删掉。它们跨的是一条真实且长期存在的边界:
+  // NotificationCenter 的 block 形式接口收的是 `@Sendable (Notification) -> Void`
+  // ——一个非隔离闭包,类型系统里没有办法声明"它只会在主线程被调用"。
+  // 而 queue: nil 表示在**发送方线程**同步回调,键盘通知恒由 UIKit 在主线程发出,
+  // 所以断言成立;改成 Task 跳回主 actor 会把同步的帧调整变成异步,键盘弹出时
+  // 会看到明显的跳动。assumeIsolated 在假设被违反时会 trap,是受检断言而非掩盖。
   override public func viewDidAppear(_ animated: Bool) {
     super.viewDidAppear(animated)
 
     NotificationCenter.default.addObserver(
       forName: UIResponder.keyboardWillShowNotification, object: nil, queue: nil
     ) { [weak self] (notification) in
+      // Notification 不是 Sendable,不能整个送进 assumeIsolated;
+      // 这里先在闭包自身的隔离域内取出唯一需要的标量(CGFloat 是 Sendable)。
+      let endKeyBoardFrameY =
+        (notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?
+        .cgRectValue.minY
 
-      guard let strongSelf = self else { return }
-      strongSelf.keyboardHasBeenShown = true
-      guard let userInfo = notification.userInfo else { return }
-      guard
-        let endKeyBoardFrame = (userInfo[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?
-          .cgRectValue.minY
-      else { return }
+      MainActor.assumeIsolated {
+        guard let strongSelf = self else { return }
+        // 注意顺序:即使拿不到键盘 frame,也要先把标志置位(沿用原行为)
+        strongSelf.keyboardHasBeenShown = true
+        guard let endKeyBoardFrame = endKeyBoardFrameY else { return }
 
-      if strongSelf.tmpContentViewFrameOrigin == nil {
-        strongSelf.tmpContentViewFrameOrigin = strongSelf.contentView.frame.origin
+        if strongSelf.tmpContentViewFrameOrigin == nil {
+          strongSelf.tmpContentViewFrameOrigin = strongSelf.contentView.frame.origin
+        }
+
+        if strongSelf.tmpCircleViewFrameOrigin == nil {
+          strongSelf.tmpCircleViewFrameOrigin = strongSelf.circleBG.frame.origin
+        }
+
+        var newContentViewFrameY = strongSelf.contentView.frame.maxY - endKeyBoardFrame
+        if newContentViewFrameY < 0 {
+          newContentViewFrameY = 0
+        }
+
+        let newBallViewFrameY = strongSelf.circleBG.frame.origin.y - newContentViewFrameY
+        strongSelf.contentView.frame.origin.y -= newContentViewFrameY
+        strongSelf.circleBG.frame.origin.y = newBallViewFrameY
       }
-
-      if strongSelf.tmpCircleViewFrameOrigin == nil {
-        strongSelf.tmpCircleViewFrameOrigin = strongSelf.circleBG.frame.origin
-      }
-
-      var newContentViewFrameY = strongSelf.contentView.frame.maxY - endKeyBoardFrame
-      if newContentViewFrameY < 0 {
-        newContentViewFrameY = 0
-      }
-
-      let newBallViewFrameY = strongSelf.circleBG.frame.origin.y - newContentViewFrameY
-      strongSelf.contentView.frame.origin.y -= newContentViewFrameY
-      strongSelf.circleBG.frame.origin.y = newBallViewFrameY
     }
 
     NotificationCenter.default.addObserver(
       forName: UIResponder.keyboardWillShowNotification, object: nil, queue: nil
-    ) { [weak self] (notification) in
+    ) { [weak self] (_) in
+      MainActor.assumeIsolated {
+        guard let strongSelf = self else { return }
+        if strongSelf.keyboardHasBeenShown {  //This could happen on the simulator (keyboard will be hidden)
+          if strongSelf.tmpContentViewFrameOrigin != nil {
+            strongSelf.contentView.frame.origin.y = strongSelf.tmpContentViewFrameOrigin!.y
+            strongSelf.tmpContentViewFrameOrigin = nil
+          }
+          if strongSelf.tmpCircleViewFrameOrigin != nil {
+            strongSelf.circleBG.frame.origin.y = strongSelf.tmpCircleViewFrameOrigin!.y
+            strongSelf.tmpCircleViewFrameOrigin = nil
+          }
 
-      guard let strongSelf = self else { return }
-      if strongSelf.keyboardHasBeenShown {  //This could happen on the simulator (keyboard will be hidden)
-        if strongSelf.tmpContentViewFrameOrigin != nil {
-          strongSelf.contentView.frame.origin.y = strongSelf.tmpContentViewFrameOrigin!.y
-          strongSelf.tmpContentViewFrameOrigin = nil
+          strongSelf.keyboardHasBeenShown = false
         }
-        if strongSelf.tmpCircleViewFrameOrigin != nil {
-          strongSelf.circleBG.frame.origin.y = strongSelf.tmpCircleViewFrameOrigin!.y
-          strongSelf.tmpCircleViewFrameOrigin = nil
-        }
-
-        strongSelf.keyboardHasBeenShown = false
       }
-
     }
   }
 
@@ -500,8 +506,7 @@ public final class SwiftyAlertView: UIViewController {
     view.alpha = 0
     view.tag = uniqueTag
     view.accessibilityIdentifier = uniqueAccessibilityIdentifier
-    // 同 viewWillLayoutSubviews 的 assumeIsolated 桥接说明,Task 17 起可删除。
-    guard let rv = MainActor.assumeIsolated({ SwiftyGlobal.keyWindow }) else {
+    guard let rv = SwiftyGlobal.keyWindow else {
       // 无可用窗口时不展示,仍返回 responder 以维持签名
       return SwiftyAlertViewResponder(alertview: self)
     }
@@ -615,8 +620,7 @@ public final class SwiftyAlertView: UIViewController {
     animationStartOffset: CGFloat = -400.0, boundingAnimationOffset: CGFloat = 15.0,
     animationDuration: TimeInterval = 0.2
   ) {
-    // 同 viewWillLayoutSubviews 的 assumeIsolated 桥接说明,Task 17 起可删除。
-    guard let rv = MainActor.assumeIsolated({ SwiftyGlobal.keyWindow }) else { return }
+    guard let rv = SwiftyGlobal.keyWindow else { return }
     var animationStartOrigin = self.baseView.frame.origin
     var animationCenter: CGPoint = rv.center
 
@@ -691,8 +695,7 @@ public final class SwiftyAlertView: UIViewController {
 
   //Return true if a SwiftyAlertView is already being shown, false otherwise
   public func isShowing() -> Bool {
-    // 同 viewWillLayoutSubviews 的 assumeIsolated 桥接说明,Task 17 起可删除。
-    if let subviews = MainActor.assumeIsolated({ SwiftyGlobal.keyWindow })?.subviews {
+    if let subviews = SwiftyGlobal.keyWindow?.subviews {
       for (_, view) in subviews.enumerated() {
         if view.tag == uniqueTag && view.accessibilityIdentifier == uniqueAccessibilityIdentifier {
           return true

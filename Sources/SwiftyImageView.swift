@@ -8,7 +8,7 @@
 
 import UIKit
 
-/// 未标注 @MainActor 的说明见 `ImageSettable` 的协议文档注释。
+@MainActor
 public class SwiftyImageView: UIView, ImageSettable {
   public var backgroundImage: UIImage? {
     didSet { applyBackgroundImage(backgroundImage) }
@@ -32,6 +32,11 @@ public class SwiftyImageView: UIView, ImageSettable {
 }
 
 extension SwiftyImageView {
+  /// 图片切换动画的描述。
+  ///
+  /// 标注 @MainActor:它的 `animations` 闭包会直接改写 SwiftyImageView 的 image,
+  /// 属于 UIKit 操作;`transition(_:with:)` 也只可能在主 actor 上调用。
+  @MainActor
   public enum ImageTransition {
     case noTransition
     case crossDissolve(TimeInterval)

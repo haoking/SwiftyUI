@@ -13,6 +13,7 @@ import UIKit
 /// 继承 UIView 而非 UILabel,绘制路径更短。全部属性为真实存储属性,
 /// 读取不经过 objc runtime(1.x 用 associated object,每帧每个 label
 /// 至少 4 次哈希查找)。
+@MainActor
 public class SwiftyLabel: UIView, TextEditable {
 
   // MARK: - TextKit
@@ -22,58 +23,39 @@ public class SwiftyLabel: UIView, TextEditable {
 
   // MARK: - 存储属性
   //
-  // 下面各 setter 中的 `if Thread.isMainThread { setNeedsDisplay() }` 是**临时**写法,
-  // 沿用自 1.x —— 当时这些属性可能从任意线程被设置。
-  //
-  // 本类型有意**不**标注 @MainActor:在 Swift 5 语言模式下,本模块内显式标注的
-  // @MainActor 会被强制执行,而 SwiftyButton 持有一个 SwiftyLabel 作为 titleLabel
-  // 并在其非隔离的 init 中访问它,此时标注会立即导致编译失败。
-  //
-  // Task 17 会为全部 UI 类型统一加上 @MainActor,届时这些守卫应当**一并删除**,
-  // 直接调用 setNeedsDisplay()。搜索 `Thread.isMainThread` 可定位全部 10 处。
+  // 各 setter 直接调用 setNeedsDisplay():本类型是 @MainActor 隔离的,
+  // 编译器已保证赋值只可能发生在主 actor 上。
+  // (1.x 允许从任意线程赋值,2.0 早期版本因此在每个 setter 里加了
+  // `if Thread.isMainThread` 守卫;隔离生效后这些守卫恒为真,已全部删除。)
 
   public var usesIntrinsicContentSize: Bool = true {
-    didSet {
-      if Thread.isMainThread { setNeedsDisplay() }
-    }
+    didSet { setNeedsDisplay() }
   }
 
   public var textAlignment: TextContentAlignment = .center {
-    didSet {
-      if Thread.isMainThread { setNeedsDisplay() }
-    }
+    didSet { setNeedsDisplay() }
   }
 
   public var font: UIFont = .systemFont(ofSize: UIFont.systemFontSize) {
-    didSet {
-      if Thread.isMainThread { setNeedsDisplay() }
-    }
+    didSet { setNeedsDisplay() }
   }
 
   /// 2.0 起为非可选。1.x 声明为 UIColor? 但 getter 永不返回 nil,
   /// 且合成属性字符串时对它强解包。
   public var textColor: UIColor = .black {
-    didSet {
-      if Thread.isMainThread { setNeedsDisplay() }
-    }
+    didSet { setNeedsDisplay() }
   }
 
   public var paragraphStyle: NSParagraphStyle = .default {
-    didSet {
-      if Thread.isMainThread { setNeedsDisplay() }
-    }
+    didSet { setNeedsDisplay() }
   }
 
   public var shadow: NSShadow? = nil {
-    didSet {
-      if Thread.isMainThread { setNeedsDisplay() }
-    }
+    didSet { setNeedsDisplay() }
   }
 
   public var attributedText: NSAttributedString? = nil {
-    didSet {
-      if Thread.isMainThread { setNeedsDisplay() }
-    }
+    didSet { setNeedsDisplay() }
   }
 
   // MARK: - 经由 NSTextContainer 的属性
@@ -83,7 +65,7 @@ public class SwiftyLabel: UIView, TextEditable {
     get { container.maximumNumberOfLines }
     set {
       container.maximumNumberOfLines = newValue
-      if Thread.isMainThread { setNeedsDisplay() }
+      setNeedsDisplay()
     }
   }
 
@@ -92,7 +74,7 @@ public class SwiftyLabel: UIView, TextEditable {
     get { container.lineFragmentPadding }
     set {
       container.lineFragmentPadding = newValue
-      if Thread.isMainThread { setNeedsDisplay() }
+      setNeedsDisplay()
     }
   }
 
@@ -101,7 +83,7 @@ public class SwiftyLabel: UIView, TextEditable {
     get { container.lineBreakMode }
     set {
       container.lineBreakMode = newValue
-      if Thread.isMainThread { setNeedsDisplay() }
+      setNeedsDisplay()
     }
   }
 

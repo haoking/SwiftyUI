@@ -52,9 +52,7 @@ public enum TextContentAlignment: Int {
 ///
 /// 1.x 曾用 9 个 associated object 在协议扩展中模拟存储属性,而实现者只有
 /// SwiftyLabel 一个。2.0 起协议只声明契约,存储由实现者以真实属性提供。
-///
-/// 本协议有意**不**标注 @MainActor —— 隔离标注在 Task 17 统一添加,
-/// 原因见 SwiftyLabel 中"存储属性"一节的说明。
+@MainActor
 public protocol TextEditable: UIView {
   var usesIntrinsicContentSize: Bool { get set }
   var textAlignment: TextContentAlignment { get set }

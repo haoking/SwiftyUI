@@ -2,13 +2,18 @@ import XCTest
 
 @testable import SwiftyUI
 
+@MainActor
 final class SwiftyToastTests: XCTestCase {
 
-  /// init 的主线程前置条件在主线程上不应触发。
-  /// (无法测试它在后台线程确实 trap —— precondition 失败会终止测试进程。)
-  func testInitOnMainThreadPassesPrecondition() {
+  /// SwiftyToast 是 @MainActor 隔离的,在主 actor 上构造应当正常工作。
+  ///
+  /// 2.0 早期靠 `precondition(Thread.isMainThread)` 做运行时检查,切到 Swift 6
+  /// 语言模式后该约束改由编译器静态强制(从非隔离上下文调用 `SwiftyToast(_:)`
+  /// 直接编译失败),precondition 已删除,因此这里也无法、也无需再测"后台线程
+  /// 会不会 trap"——那种调用现在根本无法通过编译。
+  func testInitOnMainActorSucceeds() {
     XCTAssertTrue(Thread.isMainThread)
-    _ = SwiftyToast("precondition check")
+    _ = SwiftyToast("main actor check")
     SwiftyToast.cancel()
   }
 
@@ -18,8 +23,9 @@ final class SwiftyToastTests: XCTestCase {
     SwiftyToast.cancel()
   }
 
-  /// B8:连续创建多个 toast,队列状态不应损坏(本任务未修复 B8 本身,
-  /// 这里只验证在当前单线程用法下 add/fire/finish 不会互相破坏状态)。
+  /// B8:连续创建多个 toast,队列状态不应损坏。
+  /// (B8 已由 SwiftyToastCenter 的 @MainActor 隔离修复 —— 队列只可能在主 actor
+  /// 上被读写,不再有并发访问。)
   func testMultipleToastsQueueSafely() {
     for index in 0..<10 {
       _ = SwiftyToast("toast-\(index)")

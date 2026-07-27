@@ -45,24 +45,24 @@ final class SwiftyPromiseTests: XCTestCase {
 
   func testThenCanHopToMainThread() {
     let done = expectation(description: "主线程任务执行")
-    var ranOnMain = false
+    let ranOnMain = Box(false)
 
     Promise<Void>.firstly(on: .background) {
       // 后台
     }.then(on: .main) {
-      ranOnMain = Thread.isMainThread
+      ranOnMain.value = Thread.isMainThread
       done.fulfill()
     }.catch()
 
     wait(for: [done], timeout: 10.0)
-    XCTAssertTrue(ranOnMain)
+    XCTAssertTrue(ranOnMain.value)
   }
 
   // MARK: - 值传递
 
   func testValuePropagatesAcrossThreads() {
     let done = expectation(description: "值传递")
-    var received: String?
+    let received = Box<String?>(nil)
 
     Promise<String>.firstly(on: .background) { update, _ in
       update("abc")
@@ -71,12 +71,12 @@ final class SwiftyPromiseTests: XCTestCase {
       v?.append("def")
       update(v)
     }.then(on: .main) { _, value in
-      received = value
+      received.value = value
       done.fulfill()
     }.catch()
 
     wait(for: [done], timeout: 10.0)
-    XCTAssertEqual(received, "abcdef")
+    XCTAssertEqual(received.value, "abcdef")
   }
 
   // MARK: - 错误短路

@@ -120,14 +120,14 @@ extension SwiftyColorTests {
     let image = TestSupport.makeTwoToneImage(left: .red, right: .blue)
     let done = expectation(description: "colors 回调")
 
-    var background: UIColor?
+    let background = Box<UIColor?>(nil)
     image.colors { bg, _, _, _ in
-      background = bg
+      background.value = bg
       done.fulfill()
     }
     wait(for: [done], timeout: 10.0)
 
-    let bg = try! XCTUnwrap(background)
+    let bg = try! XCTUnwrap(background.value)
     XCTAssertGreaterThan(
       bg.redValue, 0.5, "背景采样条带 x∈[5,10] 完全落在红色区域内,只有红色一种颜色")
     XCTAssertLessThan(bg.blueValue, 0.5)
@@ -137,15 +137,15 @@ extension SwiftyColorTests {
   func testImageColorsCallsBackOnMainThread() {
     let image = TestSupport.makeSolidImage(color: .green, size: CGSize(width: 64, height: 64))
     let done = expectation(description: "colors 回调")
-    var wasMainThread = false
+    let wasMainThread = Box(false)
 
     image.colors { _, _, _, _ in
-      wasMainThread = Thread.isMainThread
+      wasMainThread.value = Thread.isMainThread
       done.fulfill()
     }
 
     wait(for: [done], timeout: 10.0)
-    XCTAssertTrue(wasMainThread, "colors 的回调必须在主线程")
+    XCTAssertTrue(wasMainThread.value, "colors 的回调必须在主线程")
   }
 
   /// 排序方向的判别性基线,并对方向本身做硬断言回归。
@@ -170,22 +170,22 @@ extension SwiftyColorTests {
       body: UIColor(red: 1, green: 1, blue: 0.6, alpha: 1)
     )
     let done = expectation(description: "colors 回调")
-    var background: UIColor?
-    var primary: UIColor?
+    let background = Box<UIColor?>(nil)
+    let primary = Box<UIColor?>(nil)
     image.colors { bg, pri, _, _ in
-      background = bg
-      primary = pri
+      background.value = bg
+      primary.value = pri
       done.fulfill()
     }
     wait(for: [done], timeout: 10.0)
 
-    let bg = try! XCTUnwrap(background)
-    let pri = try! XCTUnwrap(primary)
+    let bg = try! XCTUnwrap(background.value)
+    let pri = try! XCTUnwrap(primary.value)
     print("BASELINE-SORT background = R\(bg.redValue) G\(bg.greenValue) B\(bg.blueValue)")
     print("BASELINE-SORT primary    = R\(pri.redValue) G\(pri.greenValue) B\(pri.blueValue)")
 
-    XCTAssertNotNil(background)
-    XCTAssertNotNil(primary)
+    XCTAssertNotNil(background.value)
+    XCTAssertNotNil(primary.value)
 
     // 方向敏感断言:降序取多数色(majorityEdge 深蓝 0,0,0.55),
     // 升序会取少数色(minorityEdge 深红 0.55,0,0)。

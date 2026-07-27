@@ -41,7 +41,10 @@ extension UIImage {
 
 extension UIImage {
   private struct AssociatedKey {
-    fileprivate static var isInflatedKey: UnsafeRawPointer = UnsafeRawPointer(
+    // 全库唯一保留 associated object 的地方:UIImage 是外部类型,无法为它
+    // 添加存储属性。key 本身只是一个进程内稳定的地址,分配后再不写入、
+    // 不承载任何可变状态,故 nonisolated(unsafe) 在此是安全的。
+    nonisolated(unsafe) fileprivate static let isInflatedKey = UnsafeRawPointer(
       UnsafeMutablePointer<UInt8>.allocate(capacity: 1))
   }
 
