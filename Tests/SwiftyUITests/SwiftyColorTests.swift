@@ -100,9 +100,9 @@ final class SwiftyColorTests: XCTestCase {
 
 extension SwiftyColorTests {
 
-  /// getColors() 背景采样的确定性回归(control case)。
+  /// getColors() 背景采样只读取边缘竖条 x∈[5,10],不代表整张图片的多数色。
   ///
-  /// 与 brief 原始设想不同:本测试**不能**用来验证 B6/B12 的排序方向。
+  /// 本测试**不能**用来验证 B6/B12 的排序方向。
   /// 原因(Task 3 在 task-3-report.md "Fix Round 1/5" 中已证实,本次运行
   /// 再次实测确认):getColors() 的背景采样只读取 resize 后 250px 宽位图中
   /// x∈[5,10] 这一条边缘竖条(SwiftyColor.swift 内 imageBackgroundColors
@@ -116,7 +116,7 @@ extension SwiftyColorTests {
   /// (使用 makeEdgeDiscriminatingImage,背景采样条带本身就有两种颜色)。
   /// 本测试的价值在于把原先的"仅打印基线"升级为硬断言,锁定这条边缘采样
   /// 路径修复后依然稳定、可复现。
-  func testImageColorsPicksMostCommonAsBackground() {
+  func testImageColorsBackgroundSamplesEdgeStripOnly() {
     let image = TestSupport.makeTwoToneImage(left: .red, right: .blue)
     let done = expectation(description: "colors 回调")
 
@@ -148,9 +148,9 @@ extension SwiftyColorTests {
     XCTAssertTrue(wasMainThread, "colors 的回调必须在主线程")
   }
 
-  /// 排序方向的判别性基线。
+  /// 排序方向的判别性基线,并对方向本身做硬断言回归。
   ///
-  /// 与 testImageColorsPicksMostCommonAsBackground 不同(那个测试的采样
+  /// 与 testImageColorsBackgroundSamplesEdgeStripOnly 不同(那个测试的采样
   /// 条带内只有一种颜色,无法区分排序方向),本夹具能真正区分升序/降序:
   /// 边缘采样条带内深蓝占 70%、深红占 30%,若排序为降序则背景色应为深蓝
   /// (出现最多),若为升序则为深红(出现最少)。
@@ -158,8 +158,11 @@ extension SwiftyColorTests {
   /// B12 裁决结果(Task 8):修正前(升序)background = 深红(minorityEdge,
   /// 出现最少),修正后(降序)background = 深蓝(majorityEdge,出现最多)。
   /// 证实原实现排序方向确实颠倒,已在 Sources/SwiftyColor.swift 中改为降序。
-  /// 本测试仍只做 print + 非 nil 断言,不对具体 RGB 值做硬编码断言,避免
-  /// 把浮点量化误差(如 0.55×255=140.25→140/255)锁进断言里。
+  ///
+  /// 本测试用不等式(而非精确相等)断言锁定这一方向:比较器改回升序时,
+  /// 本测试必须失败(已实测验证,见 task-8-report.md 修复轮次 2)。用不等式
+  /// 是为了不把浮点量化误差(如 0.55×255=140.25→140/255)锁进断言里,
+  /// 同时仍然具备完整的方向判别力。
   func testImageColorsSortDirectionBaseline() {
     let image = TestSupport.makeEdgeDiscriminatingImage(
       majorityEdge: UIColor(red: 0, green: 0, blue: 0.55, alpha: 1),
@@ -183,5 +186,24 @@ extension SwiftyColorTests {
 
     XCTAssertNotNil(background)
     XCTAssertNotNil(primary)
+
+    // 方向敏感断言:降序取多数色(majorityEdge 深蓝 0,0,0.55),
+    // 升序会取少数色(minorityEdge 深红 0.55,0,0)。
+    // 用不等式而非精确相等,既能判别方向又不受浮点量化影响。
+    XCTAssertGreaterThan(
+      bg.blueValue, bg.redValue,
+      "降序排序应选出现次数最多的 majorityEdge(深蓝)作为背景色;若这里偏红说明排序方向退回了升序(B6/B12)"
+    )
+    XCTAssertLessThan(
+      bg.redValue, 0.1,
+      "背景色不应是 minorityEdge(深红,R≈0.549)")
+
+    // primary 应是 body 色(浅黄 1,1,0.6)。升序时它会是一个抗锯齿混合值
+    // (Task 3 实测 R0.784 G0.749 B0.553),因为候选循环未应用
+    // randomColorsThreshold,出现 1 次的边界像素会胜出。
+    XCTAssertGreaterThan(
+      pri.redValue, 0.9,
+      "primary 应为 body 色浅黄;若明显低于 1.0 说明抗锯齿混合像素又胜出了")
+    XCTAssertGreaterThan(pri.greenValue, 0.9)
   }
 }
