@@ -46,6 +46,10 @@ private let uniqueAccessibilityIdentifier: String = "SwiftyAlert"
 //public typealias DismissBlock = () -> Void
 
 // The Main Class
+//
+// 未标注 @MainActor 的说明见 SwiftyLabel.swift"存储属性"一节;本类型与
+// SwiftyAlertButton、SwiftyAlertViewResponder(同文件)一样,隔离标注
+// 统一推迟到 Task 17。
 public final class SwiftyAlertView: UIViewController {
 
   var appearance: SwiftyAppearance!
@@ -151,7 +155,11 @@ public final class SwiftyAlertView: UIViewController {
 
   override public func viewWillLayoutSubviews() {
     super.viewWillLayoutSubviews()
-    let rv: UIWindow = UIApplication.shared.keyWindow!
+    // SwiftyGlobal 是 @MainActor 隔离的,而 SwiftyAlertView 本身不是——隔离标注
+    // 统一推迟到 Task 17(见 SwiftyLabel.swift"存储属性"一节的说明)。UIKit
+    // 保证 viewWillLayoutSubviews 只在主线程调用,故此处 assumeIsolated 不会
+    // trap;Task 17 加上 @MainActor 后,本桥接可整体删除。
+    guard let rv = MainActor.assumeIsolated({ SwiftyGlobal.keyWindow }) else { return }
     let sz = rv.frame.size
 
     // Set background frame
@@ -492,7 +500,11 @@ public final class SwiftyAlertView: UIViewController {
     view.alpha = 0
     view.tag = uniqueTag
     view.accessibilityIdentifier = uniqueAccessibilityIdentifier
-    let rv = UIApplication.shared.keyWindow! as UIWindow
+    // 同 viewWillLayoutSubviews 的 assumeIsolated 桥接说明,Task 17 起可删除。
+    guard let rv = MainActor.assumeIsolated({ SwiftyGlobal.keyWindow }) else {
+      // 无可用窗口时不展示,仍返回 responder 以维持签名
+      return SwiftyAlertViewResponder(alertview: self)
+    }
     rv.addSubview(view)
     view.frame = rv.bounds
     baseView.frame = rv.bounds
@@ -603,8 +615,8 @@ public final class SwiftyAlertView: UIViewController {
     animationStartOffset: CGFloat = -400.0, boundingAnimationOffset: CGFloat = 15.0,
     animationDuration: TimeInterval = 0.2
   ) {
-
-    let rv = UIApplication.shared.keyWindow! as UIWindow
+    // 同 viewWillLayoutSubviews 的 assumeIsolated 桥接说明,Task 17 起可删除。
+    guard let rv = MainActor.assumeIsolated({ SwiftyGlobal.keyWindow }) else { return }
     var animationStartOrigin = self.baseView.frame.origin
     var animationCenter: CGPoint = rv.center
 
@@ -679,7 +691,8 @@ public final class SwiftyAlertView: UIViewController {
 
   //Return true if a SwiftyAlertView is already being shown, false otherwise
   public func isShowing() -> Bool {
-    if let subviews = UIApplication.shared.keyWindow?.subviews {
+    // 同 viewWillLayoutSubviews 的 assumeIsolated 桥接说明,Task 17 起可删除。
+    if let subviews = MainActor.assumeIsolated({ SwiftyGlobal.keyWindow })?.subviews {
       for (_, view) in subviews.enumerated() {
         if view.tag == uniqueTag && view.accessibilityIdentifier == uniqueAccessibilityIdentifier {
           return true

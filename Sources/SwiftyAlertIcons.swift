@@ -7,15 +7,6 @@ import UIKit
 
 // 原来是 private;调用方 showTitle 现在在 SwiftyAlertView.swift,故放宽到 internal。
 final class SwiftyAlertViewStyleKit: NSObject {
-  // Cache
-  struct Cache {
-    static var imageOfCheckmark: UIImage?
-    static var imageOfCross: UIImage?
-    static var imageOfWarning: UIImage?
-    static var imageOfInfo: UIImage?
-    static var imageOfEdit: UIImage?
-  }
-
   // Drawing Methods
   class func drawCheckmark() {
     let checkmarkShapePath = UIBezierPath()
@@ -222,65 +213,49 @@ final class SwiftyAlertViewStyleKit: NSObject {
   }
 
   // Generated Images
-  class var imageOfCheckmark: UIImage {
-
-    if Cache.imageOfCheckmark != nil {
-      return Cache.imageOfCheckmark!
-    }
+  //
+  // 5 个图标改为惰性 static let(原来是可变的 Cache.imageOf* + 计算属性)。
+  // Swift 保证 static let 的初始化只执行一次且线程安全(经 swift_once),
+  // 不需要额外加锁或 @MainActor 标注就能安全地被多线程访问。
+  static let imageOfCheckmark: UIImage = {
     UIGraphicsBeginImageContextWithOptions(CGSize(width: 80, height: 80), false, 0)
     SwiftyAlertViewStyleKit.drawCheckmark()
-    Cache.imageOfCheckmark = UIGraphicsGetImageFromCurrentImageContext()
+    let image = UIGraphicsGetImageFromCurrentImageContext()!
     UIGraphicsEndImageContext()
-    return Cache.imageOfCheckmark!
-  }
+    return image
+  }()
 
-  class var imageOfCross: UIImage {
-
-    if Cache.imageOfCross != nil {
-      return Cache.imageOfCross!
-    }
+  static let imageOfCross: UIImage = {
     UIGraphicsBeginImageContextWithOptions(CGSize(width: 80, height: 80), false, 0)
     SwiftyAlertViewStyleKit.drawCross()
-    Cache.imageOfCross = UIGraphicsGetImageFromCurrentImageContext()
+    let image = UIGraphicsGetImageFromCurrentImageContext()!
     UIGraphicsEndImageContext()
-    return Cache.imageOfCross!
-  }
+    return image
+  }()
 
-  class var imageOfWarning: UIImage {
-
-    if Cache.imageOfWarning != nil {
-      return Cache.imageOfWarning!
-    }
+  static let imageOfWarning: UIImage = {
     UIGraphicsBeginImageContextWithOptions(CGSize(width: 80, height: 80), false, 0)
     SwiftyAlertViewStyleKit.drawWarning()
-    Cache.imageOfWarning = UIGraphicsGetImageFromCurrentImageContext()
+    let image = UIGraphicsGetImageFromCurrentImageContext()!
     UIGraphicsEndImageContext()
-    return Cache.imageOfWarning!
-  }
+    return image
+  }()
 
-  class var imageOfInfo: UIImage {
-
-    if Cache.imageOfInfo != nil {
-      return Cache.imageOfInfo!
-    }
+  static let imageOfInfo: UIImage = {
     UIGraphicsBeginImageContextWithOptions(CGSize(width: 80, height: 80), false, 0)
     SwiftyAlertViewStyleKit.drawInfo()
-    Cache.imageOfInfo = UIGraphicsGetImageFromCurrentImageContext()
+    let image = UIGraphicsGetImageFromCurrentImageContext()!
     UIGraphicsEndImageContext()
-    return Cache.imageOfInfo!
-  }
+    return image
+  }()
 
-  class var imageOfEdit: UIImage {
-
-    if Cache.imageOfEdit != nil {
-      return Cache.imageOfEdit!
-    }
+  static let imageOfEdit: UIImage = {
     UIGraphicsBeginImageContextWithOptions(CGSize(width: 80, height: 80), false, 0)
     SwiftyAlertViewStyleKit.drawEdit()
-    Cache.imageOfEdit = UIGraphicsGetImageFromCurrentImageContext()
+    let image = UIGraphicsGetImageFromCurrentImageContext()!
     UIGraphicsEndImageContext()
-    return Cache.imageOfEdit!
-  }
+    return image
+  }()
 }
 
 extension String {
