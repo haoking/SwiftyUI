@@ -202,7 +202,8 @@ public final class ImageCachePool: ImageCacheable {
     return ImageCachePool()
   }()
 
-  private init() {
+  // internal 以便单元测试构造独立实例。对外仍只暴露静态单例访问器。
+  init() {
     NotificationCenter.default.addObserver(
       forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: nil
     ) { [weak self] (_) in

@@ -23,7 +23,9 @@ public final class SwiftyThreadPool {
   }()
 
   private var queue: OperationQueue?
-  private init() {
+  // internal(而非 private)以便单元测试构造独立实例,避免测试间通过单例互相污染。
+  // 对外仍只暴露静态单例访问器。
+  init() {
     let queue: OperationQueue = OperationQueue()
     queue.maxConcurrentOperationCount = MAX_THREAD_COUNT
     add(prepareEnvironment(), withIdentifier: "me.haoking.environmentOperation")
