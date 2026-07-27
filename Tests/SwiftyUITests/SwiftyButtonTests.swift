@@ -29,6 +29,19 @@ final class SwiftyButtonTests: XCTestCase {
       "backgroundImage 往返后 scale 应保持不变(B3)")
   }
 
+  /// 目标-动作接线的回归保护。
+  ///
+  /// 三个点击测试直接调用 btnTapped 以绕开 sendActions(for:) 在本测试目标中的
+  /// 失效问题,代价是不再覆盖 init 里的 addTarget 注册。若该行被删除、
+  /// 事件掩码被改、或选择器名写错,那三个测试都不会失败 —— 本测试补上这一层。
+  func testTapHandlerIsRegisteredForTouchUpInside() {
+    let button = SwiftyButton(nil, nil, ClosureWrapper { _ in })
+    XCTAssertEqual(
+      button.actions(forTarget: button, forControlEvent: .touchUpInside),
+      ["btnTapped:"],
+      "init 应把 btnTapped 注册到 .touchUpInside;若此断言失败,说明接线被改动了")
+  }
+
   // 本文件用 `button.btnTapped(button)` 直接调用来模拟点击,而不是 brief 原文的
   // `button.sendActions(for: .touchUpInside)`。原因(实测确认,非猜测):这个
   // SPM 测试 target 没有宿主 App,`UIApplication.shared` 处于不可用状态,
@@ -36,11 +49,14 @@ final class SwiftyButtonTests: XCTestCase {
   // 是彻底的 no-op——即便手动挂到 UIWindow 并 makeKeyAndVisible 也一样,
   // 用 `actions(forTarget:forControlEvent:)` 验证过 target/action 确实注册
   // 成功,只是分发这一步没有发生。这与本任务要改的代码无关,是仓库里第一次
-  // 写涉及 UIControl 分发的测试时才暴露的环境限制。`btnTapped` 因此改为
-  // internal(而非 1.x 的 private),同样是为了让 `@testable import` 能直接
-  // 调用到——与 Task 13 把 mergedAttributedText 从 private 改 internal 的
-  // 理由一致。防抖逻辑本就整个搬进了 btnTapped 内部,直接调用它测的正是
-  // Step 3 要验证的行为本身。
+  // 写涉及 UIControl 分发的测试时才暴露的环境限制。
+  //
+  // `btnTapped` 因此从 `@objc private` 放宽为 internal,让 `@testable import`
+  // 能直接调用到。注意这与 Task 13 把 mergedAttributedText 改为 internal
+  // **不是同一类变更**——那个属性此前是 public,Task 13 是收紧;这里是从
+  // private 放宽,之所以可接受,是因为 @objc 方法本就经 ObjC 运行时对外
+  // 可达,Swift 访问级别并不构成真正的封装边界。防抖逻辑本就整个搬进了
+  // btnTapped 内部,直接调用它测的正是 Step 3 要验证的行为本身。
   func testTapInvokesHandler() {
     var tapCount = 0
     let button = SwiftyButton(nil, nil, ClosureWrapper { _ in tapCount += 1 })

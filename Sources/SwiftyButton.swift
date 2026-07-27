@@ -8,6 +8,7 @@
 
 import UIKit
 
+/// 未标注 @MainActor 的说明见 `ImageSettable` 的协议文档注释。
 public class SwiftyButton: UIControl, ImageSettable {
   public lazy var titleLabel: SwiftyLabel = { [unowned self] in
     let titleLabel = SwiftyLabel(nil, .black, .clear)
@@ -49,12 +50,16 @@ public class SwiftyButton: UIControl, ImageSettable {
     fatalError("init(coder:) has not been implemented")
   }
 
-  // internal(而非 private):单元测试通过 `@testable import` 直接调用本方法
-  // 来模拟点击并验证防抖逻辑。原因:这个 SPM 测试 target 没有宿主 App,
-  // UIControl.sendActions(for:) 的默认实现依赖 UIApplication.shared 做实际
-  // 分发,在该环境下是彻底的 no-op(实测确认:target/action 注册本身没问题,
-  // 分发这一步没有发生),因此测试改为直接调用 btnTapped。与 Task 13 把
-  // mergedAttributedText 从 private 改 internal 的理由一致。
+  // btnTapped 从 @objc private 放宽为 internal,作为测试接缝:这个 SPM 测试
+  // target 没有宿主 App,UIControl.sendActions(for:) 的默认实现依赖
+  // UIApplication.shared 做实际分发,在该环境下是彻底的 no-op(实测确认:
+  // target/action 注册本身没问题,分发这一步没有发生),因此测试需要直接
+  // 调用 btnTapped 而不能走 sendActions。
+  //
+  // 注意这与 Task 13 把 mergedAttributedText 改为 internal **不是同一类变更**——
+  // 那个属性此前是 public,Task 13 是收紧;这里是从 private 放宽。
+  // 之所以可接受:@objc 方法本就通过 ObjC 运行时对外可达,
+  // Swift 访问级别并不构成真正的封装边界。
   @objc
   func btnTapped(_ sender: SwiftyButton) {
     // 1.x 靠 swizzle UIControl.sendAction 实现防抖。改为在此处直接判断,

@@ -8,6 +8,7 @@
 
 import UIKit
 
+/// 未标注 @MainActor 的说明见 `ImageSettable` 的协议文档注释。
 public class SwiftyImageView: UIView, ImageSettable {
   public var backgroundImage: UIImage? {
     didSet { applyBackgroundImage(backgroundImage) }

@@ -11,6 +11,10 @@ import UIKit
 /// 可以把一张图片直接挂到 layer.contents 上的视图。
 ///
 /// 走 layer 而非 UIImageView 的绘制路径,交由 GPU 合成。
+///
+/// 本协议及其实现者(SwiftyButton、SwiftyImageView)有意**不**标注 @MainActor
+/// —— 隔离标注在 Task 17 为全部 UI 类型统一添加,原因见 SwiftyLabel 中
+/// "存储属性"一节的说明。
 public protocol ImageSettable: UIView {
   var backgroundImage: UIImage? { get set }
 }
