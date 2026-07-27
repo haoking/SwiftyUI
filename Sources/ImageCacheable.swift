@@ -8,238 +8,55 @@
 
 import UIKit
 
+/// 内存图片缓存的接口。
+///
+/// 1.x 曾用 associated object 在协议扩展中模拟存储属性,这既有 objc runtime
+/// 开销,又在并发下必然丢更新(B4)。2.0 起协议只声明契约,存储由实现者提供。
 public protocol ImageCacheable: AnyObject {
+  /// 缓存上限。超过后触发淘汰。
   var memoryCapacity: UInt64 { get set }
+  /// 淘汰后期望回落到的用量。
   var preferredMemoryUsage: UInt64 { get set }
+  /// 当前用量。
   var memoryUsage: UInt64 { get }
 
   func add(_ image: UIImage, withIdentifier identifier: String)
+  @discardableResult
   func removeImage(withIdentifier identifier: String) -> Bool
+  @discardableResult
   func removeAllImages() -> Bool
   func image(withIdentifier identifier: String) -> UIImage?
 }
 
-extension ImageCacheable {
-  public var memoryCapacity: UInt64 {
-    get {
-      guard
-        let obj = objc_getAssociatedObject(self, ImageCacheSwiftyAssociatedKeys.memoryCapacityKey)
-          as? UInt64
-      else {
-
-        memoryCapacity = 100_000_000
-        return memoryCapacity
-      }
-      return obj
-    }
-    set {
-      objc_setAssociatedObject(
-        self, ImageCacheSwiftyAssociatedKeys.memoryCapacityKey, newValue,
-        .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-    }
-  }
-
-  public var preferredMemoryUsage: UInt64 {
-    get {
-      guard
-        let obj = objc_getAssociatedObject(
-          self, ImageCacheSwiftyAssociatedKeys.preferredMemoryUsageKey) as? UInt64
-      else {
-
-        preferredMemoryUsage = 60_000_000
-        return preferredMemoryUsage
-      }
-      return obj
-    }
-    set {
-      objc_setAssociatedObject(
-        self, ImageCacheSwiftyAssociatedKeys.preferredMemoryUsageKey, newValue,
-        .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-    }
-  }
-
-  fileprivate var currentMemoryUsage: UInt64 {
-    get {
-      guard
-        let obj = objc_getAssociatedObject(
-          self, ImageCacheSwiftyAssociatedKeys.currentMemoryUsageKey) as? UInt64
-      else {
-
-        self.currentMemoryUsage = 0
-        return self.currentMemoryUsage
-      }
-      return obj
-    }
-    set {
-      objc_setAssociatedObject(
-        self, ImageCacheSwiftyAssociatedKeys.currentMemoryUsageKey, newValue,
-        .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-    }
-  }
-
-  fileprivate var synchronizationQueue: DispatchQueue {
-    get {
-      guard
-        let obj = objc_getAssociatedObject(
-          self, ImageCacheSwiftyAssociatedKeys.synchronizationQueueKey) as? DispatchQueue
-      else {
-
-        let name = String(format: "me.haoking.ImageCacheable-%08x%08x", arc4random(), arc4random())
-        self.synchronizationQueue = DispatchQueue(label: name, attributes: .concurrent)
-        return self.synchronizationQueue
-      }
-      return obj
-    }
-    set {
-      objc_setAssociatedObject(
-        self, ImageCacheSwiftyAssociatedKeys.synchronizationQueueKey, newValue,
-        .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-    }
-  }
-
-  fileprivate var cachedImages: [String: CachedImage] {
-    get {
-      guard
-        let obj = objc_getAssociatedObject(self, ImageCacheSwiftyAssociatedKeys.cachedImagesKey)
-          as? [String: CachedImage]
-      else {
-
-        self.cachedImages = [:]
-        return self.cachedImages
-      }
-      return obj
-    }
-    set {
-      objc_setAssociatedObject(
-        self, ImageCacheSwiftyAssociatedKeys.cachedImagesKey, newValue,
-        .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-    }
-  }
-}
-
-extension ImageCacheable {
-  public func add(_ image: UIImage, withIdentifier identifier: String) {
-    synchronizationQueue.async(flags: [.barrier]) { [weak self] in
-
-      guard let strongSelf = self else { return }
-      let cachedImage = CachedImage(image, identifier: identifier)
-
-      if let previousCachedImage = strongSelf.cachedImages[identifier] {
-        strongSelf.currentMemoryUsage -= previousCachedImage.totalBytes
-      }
-      strongSelf.cachedImages[identifier] = cachedImage
-      strongSelf.currentMemoryUsage += cachedImage.totalBytes
-    }
-
-    synchronizationQueue.async(flags: [.barrier]) { [weak self] in
-
-      guard let strongSelf = self else { return }
-      if strongSelf.currentMemoryUsage > strongSelf.memoryCapacity {
-        let bytesToPurge = strongSelf.currentMemoryUsage - strongSelf.preferredMemoryUsage
-
-        var sortedImages = strongSelf.cachedImages.map { $1 }
-        sortedImages.sort {
-          let date1 = $0.lastAccessDate
-          let date2 = $1.lastAccessDate
-          return date1.timeIntervalSince(date2) > 0.0
-        }
-
-        var bytesPurged = UInt64(0)
-        for (_, cachedImage) in sortedImages.enumerated().reversed() {
-          strongSelf.cachedImages.removeValue(forKey: cachedImage.identifier)
-          bytesPurged += cachedImage.totalBytes
-          if bytesPurged >= bytesToPurge { break }
-        }
-
-        strongSelf.currentMemoryUsage -= bytesPurged
-      }
-    }
-  }
-
-  @discardableResult
-  public func removeImage(withIdentifier identifier: String) -> Bool {
-    var removed = false
-
-    synchronizationQueue.sync {
-      if let cachedImage = cachedImages.removeValue(forKey: identifier) {
-        currentMemoryUsage -= cachedImage.totalBytes
-        removed = true
-      }
-    }
-
-    return removed
-  }
-
-  @discardableResult
-  public func removeAllImages() -> Bool {
-    var removed = false
-
-    synchronizationQueue.sync {
-      if !cachedImages.isEmpty {
-        cachedImages.removeAll()
-        currentMemoryUsage = 0
-        removed = true
-      }
-    }
-
-    return removed
-  }
-
-  public func image(withIdentifier identifier: String) -> UIImage? {
-    var image: UIImage?
-
-    synchronizationQueue.sync {
-      if let cachedImage = cachedImages[identifier] {
-        image = cachedImage.accessImage()
-      }
-    }
-
-    return image
-  }
-
-  public var memoryUsage: UInt64 {
-    var memoryUsage: UInt64 = 0
-    synchronizationQueue.sync { memoryUsage = currentMemoryUsage }
-    return memoryUsage
-  }
-}
-
-private class ImageCacheSwiftyAssociatedKeys {
-  fileprivate static var memoryCapacityKey: UnsafeRawPointer = UnsafeRawPointer(
-    UnsafeMutablePointer<UInt8>.allocate(capacity: 1))
-  fileprivate static var preferredMemoryUsageKey: UnsafeRawPointer = UnsafeRawPointer(
-    UnsafeMutablePointer<UInt8>.allocate(capacity: 1))
-  fileprivate static var currentMemoryUsageKey: UnsafeRawPointer = UnsafeRawPointer(
-    UnsafeMutablePointer<UInt8>.allocate(capacity: 1))
-  fileprivate static var synchronizationQueueKey: UnsafeRawPointer = UnsafeRawPointer(
-    UnsafeMutablePointer<UInt8>.allocate(capacity: 1))
-  fileprivate static var cachedImagesKey: UnsafeRawPointer = UnsafeRawPointer(
-    UnsafeMutablePointer<UInt8>.allocate(capacity: 1))
-}
-
-private class CachedImage {
+/// 缓存条目。
+final class CachedImage {
   let image: UIImage
   let identifier: String
   let totalBytes: UInt64
   var lastAccessDate: Date
+  /// 淘汰排序的决胜判据,由 ImageCachePool 在持锁状态下赋值、严格单调递增。
+  ///
+  /// 淘汰本应按 lastAccessDate 排序,但同一临界区内连续几次操作可能跑得
+  /// 比时钟采样精度还快、拿到完全相同的 Date——实测中不仅 Date(),连
+  /// DispatchTime 的纳秒级单调时钟在这种连续调用下也会撞到相同读数。
+  /// 时间戳一旦打平,sorted(by:) 对并列项的相对顺序就退化成字典哈希遍历
+  /// 顺序(逐进程随机),淘汰结果因此不确定。这个整数序号在锁内每次
+  /// 加一,不依赖任何时钟,天然不会打平,用它做排序判据即可保证确定性。
+  var lastAccessSequence: UInt64 = 0
 
-  fileprivate init(_ image: UIImage, identifier: String) {
+  init(_ image: UIImage, identifier: String) {
     self.image = image
     self.identifier = identifier
     self.lastAccessDate = Date()
-
-    self.totalBytes = {
-      let size = CGSize(
-        width: image.size.width * image.scale, height: image.size.height * image.scale)
-      let bytesPerPixel: CGFloat = 4.0
-      let bytesPerRow = size.width * bytesPerPixel
-      let totalBytes = UInt64(bytesPerRow) * UInt64(size.height)
-
-      return totalBytes
-    }()
+    let size = CGSize(
+      width: image.size.width * image.scale,
+      height: image.size.height * image.scale)
+    let bytesPerPixel: CGFloat = 4.0
+    let bytesPerRow = size.width * bytesPerPixel
+    self.totalBytes = UInt64(bytesPerRow) * UInt64(size.height)
   }
 
-  fileprivate func accessImage() -> UIImage {
+  func accessImage() -> UIImage {
     lastAccessDate = Date()
     return image
   }

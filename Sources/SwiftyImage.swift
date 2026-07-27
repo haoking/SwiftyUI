@@ -173,10 +173,20 @@ extension UIImage {
   }
 }
 
-public final class ImageCachePool: ImageCacheable {
+public final class ImageCachePool: ImageCacheable, @unchecked Sendable {
   public static let `defalut`: ImageCachePool = {
     return ImageCachePool()
   }()
+
+  // 一把锁保护下面全部状态。缓存操作的临界区都很短,
+  // 比 1.x 的并发队列 + barrier/sync 混用既更快也更正确(B4/B5)。
+  private let lock = NSLock()
+  private var cachedImages: [String: CachedImage] = [:]
+  private var currentMemoryUsage: UInt64 = 0
+  private var _memoryCapacity: UInt64 = 100_000_000
+  private var _preferredMemoryUsage: UInt64 = 60_000_000
+  // CachedImage.lastAccessSequence 的发号器,同样只在持锁状态下读写。
+  private var accessSequenceCounter: UInt64 = 0
 
   // block 形式注册的观察者由返回的 token 代表,removeObserver(self) 不生效(B18)
   private var memoryWarningObserver: (any NSObjectProtocol)?
@@ -184,11 +194,11 @@ public final class ImageCachePool: ImageCacheable {
   // internal 以便单元测试构造独立实例。对外仍只暴露静态单例访问器。
   init() {
     memoryWarningObserver = NotificationCenter.default.addObserver(
-      forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: nil
-    ) { [weak self] (_) in
-
-      guard let strongSelf = self else { return }
-      strongSelf.removeAllImages()
+      forName: UIApplication.didReceiveMemoryWarningNotification,
+      object: nil,
+      queue: nil
+    ) { [weak self] _ in
+      self?.removeAllImages()
     }
   }
 
@@ -196,5 +206,123 @@ public final class ImageCachePool: ImageCacheable {
     if let observer = memoryWarningObserver {
       NotificationCenter.default.removeObserver(observer)
     }
+  }
+
+  // MARK: - 容量
+
+  public var memoryCapacity: UInt64 {
+    get {
+      lock.lock()
+      defer { lock.unlock() }
+      return _memoryCapacity
+    }
+    set {
+      lock.lock()
+      defer { lock.unlock() }
+      _memoryCapacity = newValue
+    }
+  }
+
+  public var preferredMemoryUsage: UInt64 {
+    get {
+      lock.lock()
+      defer { lock.unlock() }
+      return _preferredMemoryUsage
+    }
+    set {
+      lock.lock()
+      defer { lock.unlock() }
+      _preferredMemoryUsage = newValue
+    }
+  }
+
+  public var memoryUsage: UInt64 {
+    lock.lock()
+    defer { lock.unlock() }
+    return currentMemoryUsage
+  }
+
+  // MARK: - 存取
+
+  /// 加入缓存。
+  ///
+  /// 1.x 用两个异步 barrier 块完成,调用方无法知道何时落地。
+  /// 2.0 起同步完成,行为可预测。
+  public func add(_ image: UIImage, withIdentifier identifier: String) {
+    lock.lock()
+    defer { lock.unlock() }
+
+    let cachedImage = CachedImage(image, identifier: identifier)
+    if let previous = cachedImages[identifier] {
+      currentMemoryUsage =
+        currentMemoryUsage >= previous.totalBytes
+        ? currentMemoryUsage - previous.totalBytes
+        : 0
+    }
+    accessSequenceCounter += 1
+    cachedImage.lastAccessSequence = accessSequenceCounter
+    cachedImages[identifier] = cachedImage
+    currentMemoryUsage += cachedImage.totalBytes
+
+    purgeIfNeededLocked()
+  }
+
+  @discardableResult
+  public func removeImage(withIdentifier identifier: String) -> Bool {
+    lock.lock()
+    defer { lock.unlock() }
+
+    guard let cachedImage = cachedImages.removeValue(forKey: identifier) else { return false }
+    // 1.x 直接做 UInt64 减法,计数一旦漂移就 trap(B5)
+    currentMemoryUsage =
+      currentMemoryUsage >= cachedImage.totalBytes
+      ? currentMemoryUsage - cachedImage.totalBytes
+      : 0
+    return true
+  }
+
+  @discardableResult
+  public func removeAllImages() -> Bool {
+    lock.lock()
+    defer { lock.unlock() }
+
+    guard !cachedImages.isEmpty else { return false }
+    cachedImages.removeAll()
+    currentMemoryUsage = 0
+    return true
+  }
+
+  public func image(withIdentifier identifier: String) -> UIImage? {
+    lock.lock()
+    defer { lock.unlock() }
+
+    guard let cachedImage = cachedImages[identifier] else { return nil }
+    accessSequenceCounter += 1
+    cachedImage.lastAccessSequence = accessSequenceCounter
+    return cachedImage.accessImage()
+  }
+
+  // MARK: - 淘汰
+
+  /// 调用方必须已持有 lock。
+  private func purgeIfNeededLocked() {
+    guard currentMemoryUsage > _memoryCapacity else { return }
+
+    let bytesToPurge = currentMemoryUsage - _preferredMemoryUsage
+    // 按访问序号升序:最久未访问的排在最前,优先淘汰。
+    // 用严格单调的整数序号而不是 lastAccessDate 排序,见 CachedImage.lastAccessSequence 的说明。
+    let sorted = cachedImages.values.sorted { $0.lastAccessSequence < $1.lastAccessSequence }
+
+    var bytesPurged: UInt64 = 0
+    for cachedImage in sorted {
+      cachedImages.removeValue(forKey: cachedImage.identifier)
+      bytesPurged += cachedImage.totalBytes
+      if bytesPurged >= bytesToPurge { break }
+    }
+
+    currentMemoryUsage =
+      currentMemoryUsage >= bytesPurged
+      ? currentMemoryUsage - bytesPurged
+      : 0
   }
 }

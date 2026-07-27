@@ -78,11 +78,50 @@ final class SwiftyImageTests: XCTestCase {
 
     XCTAssertNotNil(UIImage.load(source, identifier: identifier))
 
-    let settle = expectation(description: "settle")
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { settle.fulfill() }
-    wait(for: [settle], timeout: 3.0)
-
     XCTAssertNotNil(ImageCachePool.defalut.image(withIdentifier: identifier))
     ImageCachePool.defalut.removeImage(withIdentifier: identifier)
+  }
+
+  // MARK: - load(_ name:) 三分支
+
+  /// 缓存命中:预先用 load(_:identifier:) 填充默认缓存后,
+  /// load(_ name:) 应直接返回缓存内容,不去查 asset catalog。
+  func testLoadByNameReturnsCachedImageOnCacheHit() {
+    let identifier = "SwiftyImageTests.loadByName.hit.\(UUID().uuidString)"
+    let source = TestSupport.makeSolidImage(color: .orange)
+    _ = UIImage.load(source, identifier: identifier)
+    defer { ImageCachePool.defalut.removeImage(withIdentifier: identifier) }
+
+    XCTAssertNotNil(
+      UIImage.load(identifier),
+      "缓存中已存在该 identifier,应命中缓存而不是去查找不存在的 asset")
+  }
+
+  /// 缓存未命中 + asset 不存在:测试 bundle 没有任何图片资源,
+  /// UIImage(named:) 必然失败,load(_ name:) 应返回 nil,而不是崩溃。
+  func testLoadByNameReturnsNilWhenCacheMissAndAssetMissing() {
+    let identifier = "SwiftyImageTests.loadByName.missing.\(UUID().uuidString)"
+
+    XCTAssertNil(
+      UIImage.load(identifier),
+      "缓存未命中且 asset 不存在时应返回 nil")
+    XCTAssertNil(
+      ImageCachePool.defalut.image(withIdentifier: identifier),
+      "查找失败不应把占位内容写入缓存")
+  }
+
+  /// 缓存未命中 + asset 存在:这条分支要求 UIImage(named:) 真的能找到一张图片。
+  /// 单元测试 bundle 不携带任何 image asset(加 fixture 需要改动 Package.swift 的
+  /// resources 声明,超出本任务范围),因此这里用 XCTSkip 显式记录限制,
+  /// 而不是假装覆盖到了或悄悄漏掉这个分支。跳过前先验证前提假设本身成立。
+  func testLoadByNameWithPresentAssetIsUnavailableInTestBundle() throws {
+    let probeName = "SwiftyImageTests.probe.\(UUID().uuidString)"
+    guard UIImage(named: probeName) == nil else {
+      XCTFail("测试 bundle 出现了本不该存在的 asset,前提假设已失效,应补全此分支的真实测试")
+      return
+    }
+    throw XCTSkip(
+      "测试 bundle 没有任何 image asset,UIImage(named:) 恒为 nil,"
+        + "无法覆盖 load(_ name:) “未命中但 asset 存在”分支;需在宿主 App 或集成测试环境验证")
   }
 }
