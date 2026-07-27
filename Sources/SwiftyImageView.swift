@@ -9,27 +9,25 @@
 import UIKit
 
 public class SwiftyImageView: UIView, ImageSettable {
+  public var backgroundImage: UIImage? {
+    didSet { applyBackgroundImage(backgroundImage) }
+  }
+
+  /// backgroundImage 的别名,语义更贴近 UIImageView。
   public var image: UIImage? {
-    get { return backgroundImage }
-    set {
-      backgroundImage = newValue
-    }
+    get { backgroundImage }
+    set { backgroundImage = newValue }
   }
 
   public init(_ image: UIImage? = nil) {
     super.init(frame: .zero)
-    self.image = image
     isUserInteractionEnabled = false
+    self.image = image
   }
 
   public required init?(coder aDecoder: NSCoder) {
     fatalError("init(coder:) has not been implemented")
   }
-
-  //    public final class func load(_ image: UIImage? = nil) -> SwiftyImageView
-  //    {
-  //        return SwiftyImageView(image)
-  //    }
 }
 
 extension SwiftyImageView {

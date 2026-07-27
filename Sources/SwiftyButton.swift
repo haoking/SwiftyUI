@@ -9,18 +9,31 @@
 import UIKit
 
 public class SwiftyButton: UIControl, ImageSettable {
-  public final lazy var titleLabel: SwiftyLabel = { [unowned self] in
-    var titleLabel = SwiftyLabel(nil, .black, .clear)
+  public lazy var titleLabel: SwiftyLabel = { [unowned self] in
+    let titleLabel = SwiftyLabel(nil, .black, .clear)
     titleLabel.addTo(self)
     titleLabel.autoresizingMask = [.flexibleWidth, .flexibleHeight]
     return titleLabel
   }()
 
+  public var backgroundImage: UIImage? {
+    didSet { applyBackgroundImage(backgroundImage) }
+  }
+
+  /// 防重复点击的忽略窗口,单位秒。设为 0 可关闭。
+  /// 1.x 硬编码为 1.0 且不可配置。
+  public var ignoreEventInterval: TimeInterval = 1.0
+
+  /// 点击回调。1.x 用 associated object 保存,2.0 起为真实存储属性。
+  private var tapHandler: ClosureWrapper<SwiftyButton>?
+
+  /// 处于忽略窗口内。
+  private var isIgnoringEvent: Bool = false
+
   public init(
     _ title: String? = nil, _ image: UIImage? = nil, _ handler: ClosureWrapper<SwiftyButton>
   ) {
     super.init(frame: .zero)
-    SwiftyButton.methodExchange
     backgroundColor = .clear
     isMultipleTouchEnabled = false
     isHidden = false
@@ -28,111 +41,33 @@ public class SwiftyButton: UIControl, ImageSettable {
 
     titleLabel.text = title
     backgroundImage = image
-    addHandler(handler)
+    tapHandler = handler
+    addTarget(self, action: #selector(btnTapped(_:)), for: .touchUpInside)
   }
 
   public required init?(coder aDecoder: NSCoder) {
     fatalError("init(coder:) has not been implemented")
   }
 
-  //    public final class func load(_ title: String? = nil, _ image: UIImage? = nil, _ handler: ClosureWrapper<SwiftyButton>) -> SwiftyButton
-  //    {
-  //        return SwiftyButton.init(title, image, handler)
-  //    }
-}
-
-extension SwiftyButton {
-  private struct SwiftyAssociatedKeys {
-    fileprivate static var tapHandlerKey: UnsafeRawPointer = UnsafeRawPointer(
-      UnsafeMutablePointer<UInt8>.allocate(capacity: 1))
-    fileprivate static var tapForwardHandlerKey: UnsafeRawPointer = UnsafeRawPointer(
-      UnsafeMutablePointer<UInt8>.allocate(capacity: 1))
-  }
-
-  private final var tapHandlerWrapper: ClosureWrapper<SwiftyButton>? {
-    get {
-      guard
-        let wrapper = objc_getAssociatedObject(self, SwiftyAssociatedKeys.tapHandlerKey)
-          as? ClosureWrapper<SwiftyButton>
-      else { return nil }
-      return wrapper
-    }
-    set {
-      objc_setAssociatedObject(
-        self, SwiftyAssociatedKeys.tapHandlerKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-    }
-  }
-
-  private final func addHandler(_ handler: ClosureWrapper<SwiftyButton>) {
-    tapHandlerWrapper = handler
-    self.addTarget(self, action: #selector(btnTapped(_:)), for: .touchUpInside)
-  }
-
+  // internal(而非 private):单元测试通过 `@testable import` 直接调用本方法
+  // 来模拟点击并验证防抖逻辑。原因:这个 SPM 测试 target 没有宿主 App,
+  // UIControl.sendActions(for:) 的默认实现依赖 UIApplication.shared 做实际
+  // 分发,在该环境下是彻底的 no-op(实测确认:target/action 注册本身没问题,
+  // 分发这一步没有发生),因此测试改为直接调用 btnTapped。与 Task 13 把
+  // mergedAttributedText 从 private 改 internal 的理由一致。
   @objc
-  private final func btnTapped(_ sender: SwiftyButton) {
-    if let handler = tapHandlerWrapper?.closure {
-      handler(sender)
-    }
-  }
+  func btnTapped(_ sender: SwiftyButton) {
+    // 1.x 靠 swizzle UIControl.sendAction 实现防抖。改为在此处直接判断,
+    // 既不需要改写运行时,也让间隔变得可配置。
+    guard !isIgnoringEvent else { return }
 
-  private final var tapForwardHandlerWrapper: ClosureWrapper<SwiftyButton>? {
-    get {
-      guard
-        let wrapper = objc_getAssociatedObject(self, SwiftyAssociatedKeys.tapForwardHandlerKey)
-          as? ClosureWrapper<SwiftyButton>
-      else { return nil }
-      return wrapper
-    }
-    set {
-      objc_setAssociatedObject(
-        self, SwiftyAssociatedKeys.tapForwardHandlerKey, newValue,
-        .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-    }
-  }
-}
-
-extension SwiftyButton {
-  private struct SwiftyButtonAssociatedKeys {
-    fileprivate static var isIgnoreEventKey: UnsafeRawPointer = UnsafeRawPointer(
-      UnsafeMutablePointer<UInt8>.allocate(capacity: 1))
-  }
-
-  private final var isIgnoreEvent: Bool? {
-    get {
-      guard
-        let obj = objc_getAssociatedObject(self, SwiftyButtonAssociatedKeys.isIgnoreEventKey)
-          as? Bool
-      else {
-
-        self.isIgnoreEvent = false
-        return self.isIgnoreEvent
+    if ignoreEventInterval > 0 {
+      isIgnoringEvent = true
+      DispatchQueue.main.asyncAfter(deadline: .now() + ignoreEventInterval) { [weak self] in
+        self?.isIgnoringEvent = false
       }
-      return obj
     }
-    set {
-      objc_setAssociatedObject(
-        self, SwiftyButtonAssociatedKeys.isIgnoreEventKey, newValue,
-        .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-    }
-  }
 
-  fileprivate static let methodExchange: Void = {
-
-    let originalSelector: Selector = #selector(sendAction(_:to:for:))
-    let swizzledSelector: Selector = #selector(mySendAction(_:to:for:))
-    swizzleInstance(originalSelector, swizzledSelector)
-  }()
-
-  @objc
-  private func mySendAction(_ action: Selector, to target: Any?, for event: UIEvent?) {
-    guard isIgnoreEvent == false else { return }
-    perform(#selector(resetState), with: self, afterDelay: 1.0)
-    isIgnoreEvent = true
-    mySendAction(action, to: target, for: event)
-  }
-
-  @objc
-  private final func resetState() {
-    isIgnoreEvent = false
+    tapHandler?.closure?(sender)
   }
 }
