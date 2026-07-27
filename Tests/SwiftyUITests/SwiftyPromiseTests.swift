@@ -246,4 +246,145 @@ final class SwiftyPromiseTests: XCTestCase {
         "chain-\(index) 的值被串扰或丢失(B7)")
     }
   }
+
+  // MARK: - async 桥接
+
+  func testAsyncValueReturnsFinalValue() async throws {
+    let value = try await Promise<String>.firstly(on: .background) { update, _ in
+      update("abc")
+    }.then { update, current in
+      update((current ?? "") + "-def")
+    }.value()
+
+    XCTAssertEqual(value, "abc-def")
+  }
+
+  func testAsyncValueThrowsChainError() async {
+    do {
+      _ = try await Promise<String>.firstly(on: .background) { _, _ in
+        throw TestError()
+      }.value()
+      XCTFail("应当抛出链条中的错误")
+    } catch {
+      XCTAssertTrue(error is TestError)
+    }
+  }
+
+  func testAsyncValueOnVoidPromise() async throws {
+    let recorder = Recorder()
+    _ = try await Promise<Void>.firstly {
+      recorder.record("task1")
+    }.then {
+      recorder.record("task2")
+    }.value()
+
+    XCTAssertEqual(recorder.snapshot, ["task1", "task2"])
+  }
+
+  /// 模拟一个只能在主 actor 上访问状态的调用方(例如视图模型)。
+  /// value() 是面向调用方的 API——Task 17 的教训是曾验证过"库内零桥接"
+  /// 却没验证"调用方零桥接",这里补上那一面:在 MainActor 隔离方法里
+  /// 直接 await value() 并把结果写回 MainActor 隔离的属性,不做任何桥接。
+  /// 如果 value() 的实现悄悄要求调用方处于某个特定隔离域,这里会在编译期
+  /// 报错,而不是留到某个消费者的 App 里才发现。
+  @MainActor
+  private final class MainActorConsumer {
+    var received: String?
+
+    func load() async throws {
+      received = try await Promise<String>.firstly(on: .background) { update, _ in
+        update("main-actor-value")
+      }.value()
+    }
+  }
+
+  @MainActor
+  func testAsyncValueCallableFromMainActor() async throws {
+    let consumer = MainActorConsumer()
+    try await consumer.load()
+    XCTAssertEqual(consumer.received, "main-actor-value")
+  }
+
+  /// 出错路径上 always 与 catch 的 errorBlock 都会触发,靠 ResumeGuard
+  /// 保证只恢复一次。单次运行不足以说明问题——若存在二次 resume,
+  /// 进程会立刻因 SWIFT TASK CONTINUATION MISUSE 崩溃,因此跑 100 次
+  /// 顺序调用,把"从未崩溃"当作证据的一部分。
+  func testAsyncValueErrorPathNeverDoubleResumes() async throws {
+    for _ in 0..<100 {
+      do {
+        _ = try await Promise<String>.firstly(on: .background) { _, _ in
+          throw TestError()
+        }.value()
+        XCTFail("应当抛出链条中的错误")
+      } catch {
+        XCTAssertTrue(error is TestError)
+      }
+    }
+  }
+
+  /// 并发跑多条会出错的链,让不同链之间的调度交织更复杂,
+  /// 进一步放大二次 resume / continuation 泄漏可能暴露的窗口。
+  func testAsyncValueErrorPathConcurrentStress() async {
+    await withTaskGroup(of: Void.self) { group in
+      for _ in 0..<50 {
+        group.addTask {
+          do {
+            _ = try await Promise<String>.firstly(on: .background) { _, _ in
+              throw TestError()
+            }.value()
+            XCTFail("应当抛出链条中的错误")
+          } catch {
+            XCTAssertTrue(error is TestError)
+          }
+        }
+      }
+    }
+  }
+
+  /// 并发跑多条成功的链:既验证并发下取值互不串扰,也是对 always 闭包
+  /// 改用强 self(而非 [weak self])这一决定的压力测试——如果强 self
+  /// 的选择有问题,高并发、高频创建/释放 Promise 的场景更容易暴露竞态。
+  func testAsyncValueConcurrentSuccessStress() async {
+    await withTaskGroup(of: Void.self) { group in
+      for index in 0..<50 {
+        group.addTask {
+          do {
+            let value = try await Promise<String>.firstly(on: .background) { update, _ in
+              update("chain-\(index)")
+            }.then { update, current in
+              update((current ?? "") + "-done")
+            }.value()
+            XCTAssertEqual(value, "chain-\(index)-done")
+          } catch {
+            XCTFail("不应抛错: \(error)")
+          }
+        }
+      }
+    }
+  }
+
+  /// value() 内部让 always 闭包强引用 self,以避免闭包真正执行前 self
+  /// 被提前释放(见 Sources/SwiftyPromise.swift 中 value() 的注释)。
+  /// 这里验证这个选择不会造成永久循环引用:链条终结后应当仍能被释放。
+  func testAsyncValuePromiseIsReleasedAfterCompletion() async throws {
+    weak var weakPromise: Promise<String>?
+
+    do {
+      let promise = Promise<String>.firstly(on: .background) { update, _ in
+        update("abc")
+      }
+      weakPromise = promise
+      let value = try await promise.value()
+      XCTAssertEqual(value, "abc")
+    }
+
+    // RunLoop.current.run(until:) 在 async 上下文里不可用,改用 Task.sleep
+    // 轮询;每次挂起/恢复都会跨越一次 Swift 并发运行时自己的 autorelease
+    // 边界,足以让上面 do 块结束后失去的最后一个强引用被真正释放。
+    let deadline = Date().addingTimeInterval(5.0)
+    while weakPromise != nil && Date() < deadline {
+      try await Task.sleep(nanoseconds: 50_000_000)
+    }
+    XCTAssertNil(weakPromise, "value() 完成后 Promise 应被释放(不能有循环引用)")
+  }
 }

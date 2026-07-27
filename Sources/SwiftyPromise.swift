@@ -207,6 +207,44 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
     beginIfNeeded()
   }
 
+  /// 终结链条并以 await 取回最终值。
+  ///
+  /// 链条中的错误经由 throws 抛出。与 start() / catch(_:) 一样,
+  /// 本方法也是终结符——同一个 Promise 只能终结一次;内部借道
+  /// catch(_:) 复用同一把 isStarted 门闩(见 beginIfNeeded()),不另开
+  /// 新的启动路径。
+  public func value() async throws -> T? {
+    return try await withCheckedThrowingContinuation { continuation in
+      // 用一个 box 保证 continuation 只被恢复一次:链条正常结束与出错
+      // 互斥,但两条路径都会走到这里——出错时 markError 先调用下面的
+      // errorBlock,随后 fire() 仍会把 always 当作终结的一部分执行到,
+      // ResumeGuard 保证先到者胜出(详见 markError 与 fire() 的顺序:
+      // markError 在抛错任务的主体里同步完成,严格早于该任务的
+      // completionBlock 触发的下一次 fire())。
+      let resumed = ResumeGuard()
+
+      self.always(on: .background) {
+        // 这里刻意用强 self,不用 [weak self]:fire() 只在 .run(下一个
+        // 常规任务) 时才会设置 completionBlock = { self.fire() } 来强引用
+        // self;轮到 .finish(即将执行 always 任务)时不会再设这层强引用。
+        // 也就是说,常规任务链跑完的那一刻,原本撑住 self 的强引用就已经
+        // 释放——如果这个闭包只弱引用 self,self 就可能在 always 任务被
+        // 目标队列真正调度到之前被提前释放,读到的 currentValue 会被错误
+        // 地当成 nil。改成强引用后,这个闭包本身(经 alwaysTasks ->
+        // Operation -> 目标队列)成为新的强引用链,一直撑到 always 任务
+        // 执行完毕。不会造成永久循环引用:fire() 终结链条时会把
+        // alwaysTasks 转交给目标队列并清空自己的引用,任务跑完后队列释放
+        // Operation,循环随之打破(回归测试见
+        // testAsyncValuePromiseIsReleasedAfterCompletion)。
+        guard resumed.claim() else { return }
+        continuation.resume(returning: self.currentValue)
+      }.catch { error in
+        guard resumed.claim() else { return }
+        continuation.resume(throwing: error)
+      }
+    }
+  }
+
   /// 终结只生效一次:重复调用 start()/catch(),或两者都调用,都不会二次推进链条
   /// ——否则两次 fire() 会并发跑同一条链上的两个任务。
   private func beginIfNeeded() {
@@ -264,5 +302,24 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
     case .nothing:
       break
     }
+  }
+}
+
+/// 保证 CheckedContinuation 只被恢复一次。
+///
+/// @unchecked Sendable 是安全的:claimed 只经由 lock 保护的临界区读写,
+/// 与 Promise、ImageCachePool、SwiftyThreadPool 同一模式——线程安全靠
+/// 互斥同步保证,编译器无法验证这一点,故为 unchecked。
+private final class ResumeGuard: @unchecked Sendable {
+  private let lock = NSLock()
+  private var claimed = false
+
+  /// 首次调用返回 true,之后一律返回 false。
+  func claim() -> Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    guard !claimed else { return false }
+    claimed = true
+    return true
   }
 }
