@@ -32,7 +32,9 @@ public final class SwiftyToast {
   private func layoutView(text: String) {
     toastLabel.text = text
 
-    let containerSize: CGSize = SwiftyGlobal.keyWindow.bounds.size
+    let containerSize: CGSize = MainActor.assumeIsolated {
+      SwiftyGlobal.keyWindow?.bounds.size ?? .zero
+    }
     let constraintSize: CGSize = CGSize(
       width: containerSize.width * (280.0 / 320.0), height: CGFloat.greatestFiniteMagnitude)
     let fitSize: CGSize = toastLabel.sizeThatFits(constraintSize)
@@ -60,33 +62,43 @@ public final class SwiftyToast {
 
   fileprivate func show() {
     Promise<Void>.firstly(on: .main) {
-      self.toastLabel.alpha = 0
-      SwiftyGlobal.keyWindow.addSubview(self.toastLabel)
+      // SwiftyGlobal.keyWindow 是 @MainActor 隔离的;show() 本身不是(Task 16
+      // 之前不改 SwiftyToast 的隔离范围),但 Promise 保证 `on: .main` 的任务
+      // 确实在主线程执行,故用 assumeIsolated 做运行时断言而非静态隔离改造。
+      MainActor.assumeIsolated {
+        guard let window = SwiftyGlobal.keyWindow else {
+          // 无可用窗口时静默丢弃,并推进队列,避免后续 toast 被永久阻塞
+          SwiftyToastCenter.default.finish()
+          return
+        }
+        self.toastLabel.alpha = 0
+        window.addSubview(self.toastLabel)
 
-      UIView.animate(
-        withDuration: 0.5, delay: 0.0, options: .beginFromCurrentState,
-        animations: {
-          self.toastLabel.alpha = 1
-        },
-        completion: { completed in
-          UIView.animate(
-            withDuration: 2.5,
-            animations: {
-              self.toastLabel.alpha = 1.0001
-            },
-            completion: { completed in
-              UIView.animate(
-                withDuration: 0.5,
-                animations: {
-                  self.toastLabel.alpha = 0
-                },
-                completion: { completed in
-                  self.toastLabel.removeFromSuperview()
-                  SwiftyToastCenter.default.finish()
-                })
-            })
-        })
-    }.catch()
+        UIView.animate(
+          withDuration: 0.5, delay: 0.0, options: .beginFromCurrentState,
+          animations: {
+            self.toastLabel.alpha = 1
+          },
+          completion: { _ in
+            UIView.animate(
+              withDuration: 2.5,
+              animations: {
+                self.toastLabel.alpha = 1.0001
+              },
+              completion: { _ in
+                UIView.animate(
+                  withDuration: 0.5,
+                  animations: {
+                    self.toastLabel.alpha = 0
+                  },
+                  completion: { _ in
+                    self.toastLabel.removeFromSuperview()
+                    SwiftyToastCenter.default.finish()
+                  })
+              })
+          })
+      }
+    }.start()
   }
 
   public class func cancel() {
