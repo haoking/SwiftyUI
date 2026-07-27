@@ -18,7 +18,18 @@ public final class SwiftyToast {
     return toastLabel
   }()
 
+  /// 创建并排队显示一个 Toast。
+  ///
+  /// - Important: 必须在主线程调用。SwiftyToast 会创建并测量 UIKit 视图、
+  ///   读取当前 window scene、并修改全局的 Toast 队列,这些都要求主线程。
+  ///   1.x 在后台线程调用时不会报错,但属于未定义行为(在后台创建并测量
+  ///   UILabel、并发修改队列状态)。2.0 起改为快速失败。
+  ///   Task 16 给本类型加上 @MainActor 后,这一约束将由编译器强制。
   public init(_ text: String) {
+    precondition(
+      Thread.isMainThread,
+      "SwiftyToast 必须在主线程构造:它会创建并测量 UIKit 视图、读取 window scene、"
+        + "并修改全局 Toast 队列。请把这次调用移到主线程。")
     layoutView(text: text)
     SwiftyToastCenter.default.add(self).fire()
   }
@@ -32,6 +43,9 @@ public final class SwiftyToast {
   private func layoutView(text: String) {
     toastLabel.text = text
 
+    // SwiftyGlobal 是 @MainActor 隔离的,而本方法是非隔离的。
+    // init 的 precondition 已保证我们在主线程,故此处 assumeIsolated 不会 trap。
+    // Task 16 给 SwiftyToast 加上 @MainActor 后,本桥接可整体删除。
     let containerSize: CGSize = MainActor.assumeIsolated {
       SwiftyGlobal.keyWindow?.bounds.size ?? .zero
     }
