@@ -79,12 +79,20 @@ final class ImageCachePoolTests: XCTestCase {
       _ = self.cache.image(withIdentifier: key)
     }
 
-    // 无论并发顺序如何,内存计数必须等于当前实际驻留的图片数 * 单张字节数
-    let usage = cache.memoryUsage
+    // 遍历全部可能的 key,独立数出实际驻留的条目数,
+    // 再据此校验内存计数。这个不变量在任何正确实现下都成立
+    // (与哪个并发写入者"胜出"无关),而丢更新会直接破坏它。
+    // 原来的 usage % perImageBytes == 0 是结构性无效的:
+    // 每张图都是 256 字节,丢一次更新只会让计数偏移 256 的整数倍。
+    var liveCount = 0
+    for index in 0..<20 {
+      if cache.image(withIdentifier: "concurrent-\(index)") != nil {
+        liveCount += 1
+      }
+    }
     XCTAssertEqual(
-      usage % perImageBytes, 0,
-      "内存计数出现漂移,说明存在竞争(B4/B5)")
-    XCTAssertLessThanOrEqual(usage, perImageBytes * 20)
+      cache.memoryUsage, UInt64(liveCount) * perImageBytes,
+      "内存计数与实际驻留条目数不符,说明存在丢更新(B4)")
   }
 
   /// B5:反复增删不应导致 UInt64 下溢 trap。
@@ -95,6 +103,22 @@ final class ImageCachePoolTests: XCTestCase {
       cache.removeImage(withIdentifier: "churn")
     }
     XCTAssertEqual(cache.memoryUsage, 0)
+  }
+
+  /// B5:两个容量设反时不应 trap。
+  /// preferredMemoryUsage > memoryCapacity 是易犯的配置错误,
+  /// 此时 currentMemoryUsage 可能高于 capacity(触发淘汰)却低于 preferred,
+  /// 未钳制的减法会在这里下溢。
+  func testInvertedCapacitiesDoNotUnderflow() {
+    cache.memoryCapacity = 256 * 2
+    cache.preferredMemoryUsage = 256 * 10  // 故意大于 capacity
+
+    let image = TestSupport.makeSolidImage(color: .red, size: CGSize(width: 8, height: 8))
+    for index in 0..<5 {
+      cache.add(image, withIdentifier: "inverted-\(index)")
+    }
+    // 能走到这里就说明没有 trap
+    XCTAssertLessThanOrEqual(cache.memoryUsage, 256 * 5)
   }
 
   /// LRU:超出容量时应优先淘汰最久未访问的条目。

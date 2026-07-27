@@ -33,6 +33,8 @@ final class CachedImage {
   let image: UIImage
   let identifier: String
   let totalBytes: UInt64
+  /// 记录最后访问时刻。**不再用于淘汰排序** —— 见 lastAccessSequence 的说明。
+  /// 保留它是为了保持 CachedImage 的可观测性,以及将来可能的诊断用途。
   var lastAccessDate: Date
   /// 淘汰排序的决胜判据,由 ImageCachePool 在持锁状态下赋值、严格单调递增。
   ///

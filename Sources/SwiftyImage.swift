@@ -308,7 +308,13 @@ public final class ImageCachePool: ImageCacheable, @unchecked Sendable {
   private func purgeIfNeededLocked() {
     guard currentMemoryUsage > _memoryCapacity else { return }
 
-    let bytesToPurge = currentMemoryUsage - _preferredMemoryUsage
+    // 钳住下限:preferredMemoryUsage 可能被调用方设得比 memoryCapacity 还大
+    // (两个 setter 互不校验),此时 currentMemoryUsage 可能高于 capacity(触发
+    // 淘汰)却低于 preferred,不钳制就会在这里 UInt64 下溢 trap(B5)。
+    let bytesToPurge =
+      currentMemoryUsage >= _preferredMemoryUsage
+      ? currentMemoryUsage - _preferredMemoryUsage
+      : 0
     // 按访问序号升序:最久未访问的排在最前,优先淘汰。
     // 用严格单调的整数序号而不是 lastAccessDate 排序,见 CachedImage.lastAccessSequence 的说明。
     let sorted = cachedImages.values.sorted { $0.lastAccessSequence < $1.lastAccessSequence }
