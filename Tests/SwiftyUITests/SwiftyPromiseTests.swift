@@ -6,27 +6,6 @@ private struct TestError: Error {}
 
 final class SwiftyPromiseTests: XCTestCase {
 
-  /// 本类在 Task 7 修复 B7 之前整体跳过。
-  ///
-  /// 跳过原因不是断言失败,而是 SwiftyPromise 当前存在**崩溃级**竞争:
-  /// `fire()` 读取 `tasks.first`、启动它、再 `removeFirst()`,三步之间无同步。
-  /// 两个线程并发进入 `fire()` 时会把同一个 operation 二次投递到
-  /// OperationQueue,触发未捕获的 NSException,使整个测试进程崩溃
-  /// (实测约 1/4~1/3 概率,隔离运行同样复现)。
-  ///
-  /// 若放任其随机崩溃,Tasks 6–21 的每一次全量回归都不可信,故在修复前跳过。
-  /// **Task 7 的第一步就是删除本覆写**,先看到崩溃或失败,再实施修复。
-  ///
-  /// 崩溃前采集到的 always 顺序基线(B11 的直接证据,三次干净运行):
-  ///   ["always", "task1", "task2"]
-  ///   ["task1", "always", "task2"]
-  ///   ["always", "task1", "task2"]
-  /// 顺序不确定本身就证明 always 没有排在链条之后。
-  override func setUpWithError() throws {
-    try super.setUpWithError()
-    throw XCTSkip("SwiftyPromise 存在崩溃级竞争 B7;Task 7 修复后删除本覆写以启用这些测试")
-  }
-
   /// 记录执行顺序的线程安全收集器
   private final class Recorder: @unchecked Sendable {
     private let lock = NSLock()
@@ -124,16 +103,12 @@ final class SwiftyPromiseTests: XCTestCase {
       "抛错之后的 then 不应执行")
   }
 
-  // MARK: - 待修复行为的基线
+  // MARK: - B11 / B16 回归
 
-  /// B11:always 应当在链条终结之后执行,但当前实现在 catch() 里
-  /// 先启动 alwaysTasks 再 fire() 主链条,导致 always 反而排在前面。
-  ///
-  /// 本测试只记录顺序,不断言对错——当前顺序取决于队列调度,不稳定。
-  /// Task 7 会把它改为确定性断言:always 必须是最后一项。
-  func testAlwaysOrderingBaseline() {
+  /// B11:always 必须在链条全部完成之后才执行。
+  func testAlwaysRunsAfterChainCompletes() {
     let recorder = Recorder()
-    let done = expectation(description: "链条结束")
+    let done = expectation(description: "always 执行")
 
     Promise<Void>.firstly {
       recorder.record("task1")
@@ -141,34 +116,134 @@ final class SwiftyPromiseTests: XCTestCase {
       recorder.record("task2")
     }.always {
       recorder.record("always")
+      done.fulfill()
     }.catch { _ in }
 
-    // always 与主链条并发,没有可靠的结束信号,只能定时采样
-    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { done.fulfill() }
     wait(for: [done], timeout: 10.0)
-
-    print("BASELINE always 顺序 = \(recorder.snapshot)")
-    XCTAssertTrue(recorder.snapshot.contains("always"), "always 至少应该执行过")
+    XCTAssertEqual(
+      recorder.snapshot, ["task1", "task2", "always"],
+      "always 必须是最后一项(B11)")
   }
 
-  /// B16:不调用 catch() 的链条永远不会启动。
-  /// 当前(错误)行为:任务不执行。Task 7 引入 start() 后会新增正确的测试。
-  func testChainWithoutCatchNeverRuns_currentBuggyBehavior() {
+  /// B11:即使链条中途抛错,always 仍必须执行,且排在 catch 之后。
+  func testAlwaysRunsAfterErrorShortCircuit() {
     let recorder = Recorder()
+    let done = expectation(description: "always 执行")
 
     Promise<Void>.firstly {
-      recorder.record("不应执行")
+      recorder.record("task1")
     }.then {
-      recorder.record("也不应执行")
+      throw TestError()
+    }.then {
+      recorder.record("不应执行")
+    }.always {
+      recorder.record("always")
+      done.fulfill()
+    }.catch { _ in
+      recorder.record("catch")
     }
-    // 故意不调用 .catch()
 
-    let settle = expectation(description: "settle")
-    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { settle.fulfill() }
-    wait(for: [settle], timeout: 5.0)
+    wait(for: [done], timeout: 10.0)
+    XCTAssertEqual(recorder.snapshot, ["task1", "catch", "always"])
+  }
 
-    XCTAssertTrue(
-      recorder.snapshot.isEmpty,
-      "若此断言失败,说明 B16 已被修复,请改用 Task 7 中的正确断言")
+  /// B16:start() 可以在不提供错误处理的情况下启动链条。
+  func testStartRunsChainWithoutCatch() {
+    let recorder = Recorder()
+    let done = expectation(description: "链条结束")
+
+    Promise<Void>.firstly {
+      recorder.record("task1")
+    }.then {
+      recorder.record("task2")
+      done.fulfill()
+    }.start()
+
+    wait(for: [done], timeout: 10.0)
+    XCTAssertEqual(recorder.snapshot, ["task1", "task2"])
+  }
+
+  /// 终结符只生效一次:重复调用 start(),或 start() 之后再 catch(),
+  /// 都不能二次推进链条(否则同一条链上的两个任务会被并发投递)。
+  func testTerminatorStartsChainOnlyOnce() {
+    let recorder = Recorder()
+    let done = expectation(description: "链条结束")
+
+    let promise = Promise<Void>.firstly {
+      // 故意慢一步:若链条被二次推进,task2 会抢在 task1 前面记录
+      Thread.sleep(forTimeInterval: 0.1)
+      recorder.record("task1")
+    }.then {
+      recorder.record("task2")
+      done.fulfill()
+    }
+
+    promise.start()
+    promise.start()
+    promise.catch { _ in }
+
+    wait(for: [done], timeout: 10.0)
+    XCTAssertEqual(recorder.snapshot, ["task1", "task2"])
+  }
+
+  // MARK: - 生命周期
+
+  /// 链条运行期间由已投递的 operation 持有 Promise,链条结束后必须释放:
+  /// 既不能提前释放(链条跑不完),也不能留下循环引用。
+  func testPromiseIsReleasedAfterChainCompletes() {
+    weak var weakPromise: Promise<Void>?
+    let done = expectation(description: "链条结束")
+
+    autoreleasepool {
+      // 调用方不持有任何引用,链条仍必须跑完
+      let promise = Promise<Void>.firstly {
+        // 后台
+      }.then(on: .main) {
+        done.fulfill()
+      }
+      weakPromise = promise
+      promise.start()
+    }
+
+    wait(for: [done], timeout: 10.0)
+
+    // operation 完成后由队列异步释放,轮询等待而不是立即断言
+    let deadline = Date().addingTimeInterval(5.0)
+    while weakPromise != nil && Date() < deadline {
+      RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+    }
+    XCTAssertNil(weakPromise, "链条结束后 Promise 应被释放(不能有循环引用)")
+  }
+
+  // MARK: - B7 回归
+
+  /// B7:并发地跑多条链,内部状态不应互相串扰。
+  func testConcurrentChainsDoNotInterfere() {
+    let iterations = 20
+    let done = expectation(description: "全部链条结束")
+    done.expectedFulfillmentCount = iterations
+
+    let results = Recorder()
+
+    for index in 0..<iterations {
+      Promise<String>.firstly(on: .background) { update, _ in
+        update("chain-\(index)")
+      }.then { update, value in
+        update((value ?? "") + "-step2")
+      }.then(on: .main) { _, value in
+        results.record(value ?? "nil")
+        done.fulfill()
+      }.start()
+    }
+
+    wait(for: [done], timeout: 30.0)
+
+    let snapshot = results.snapshot
+    XCTAssertEqual(snapshot.count, iterations)
+    for index in 0..<iterations {
+      XCTAssertTrue(
+        snapshot.contains("chain-\(index)-step2"),
+        "chain-\(index) 的值被串扰或丢失(B7)")
+    }
   }
 }
