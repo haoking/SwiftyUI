@@ -24,7 +24,7 @@ public final class SwiftyToast {
   ///   读取当前 window scene、并修改全局的 Toast 队列,这些都要求主线程。
   ///   1.x 在后台线程调用时不会报错,但属于未定义行为(在后台创建并测量
   ///   UILabel、并发修改队列状态)。2.0 起改为快速失败。
-  ///   Task 16 给本类型加上 @MainActor 后,这一约束将由编译器强制。
+  ///   Task 17 给本类型加上 @MainActor 后,这一约束将由编译器强制。
   public init(_ text: String) {
     precondition(
       Thread.isMainThread,
@@ -45,9 +45,13 @@ public final class SwiftyToast {
 
     // SwiftyGlobal 是 @MainActor 隔离的,而本方法是非隔离的。
     // init 的 precondition 已保证我们在主线程,故此处 assumeIsolated 不会 trap。
-    // Task 16 给 SwiftyToast 加上 @MainActor 后,本桥接可整体删除。
-    let containerSize: CGSize = MainActor.assumeIsolated {
-      SwiftyGlobal.keyWindow?.bounds.size ?? .zero
+    // Task 17 给 SwiftyToast 加上 @MainActor 后,本桥接可整体删除。
+    let (containerSize, isPortrait): (CGSize, Bool) = MainActor.assumeIsolated {
+      let window = SwiftyGlobal.keyWindow
+      return (
+        window?.bounds.size ?? .zero,
+        window?.windowScene?.interfaceOrientation.isPortrait ?? true
+      )
     }
     let constraintSize: CGSize = CGSize(
       width: containerSize.width * (280.0 / 320.0), height: CGFloat.greatestFiniteMagnitude)
@@ -58,7 +62,7 @@ public final class SwiftyToast {
     var width: CGFloat
     var height: CGFloat
 
-    if UIApplication.shared.statusBarOrientation.isPortrait {
+    if isPortrait {
       width = containerSize.width
       height = containerSize.height
       y = 30.0
@@ -76,9 +80,9 @@ public final class SwiftyToast {
 
   fileprivate func show() {
     Promise<Void>.firstly(on: .main) {
-      // SwiftyGlobal.keyWindow 是 @MainActor 隔离的;show() 本身不是(Task 16
-      // 之前不改 SwiftyToast 的隔离范围),但 Promise 保证 `on: .main` 的任务
-      // 确实在主线程执行,故用 assumeIsolated 做运行时断言而非静态隔离改造。
+      // SwiftyGlobal.keyWindow 是 @MainActor 隔离的;show() 本身不是——SwiftyToast
+      // 的隔离标注统一推迟到 Task 17,但 Promise 保证 `on: .main` 的任务确实
+      // 在主线程执行,故用 assumeIsolated 做运行时断言而非静态隔离改造。
       MainActor.assumeIsolated {
         guard let window = SwiftyGlobal.keyWindow else {
           // 无可用窗口时静默丢弃,并推进队列,避免后续 toast 被永久阻塞
@@ -120,6 +124,17 @@ public final class SwiftyToast {
   }
 }
 
+// B8: queueArray 与 isFinished 是普通存储属性,没有任何同步保护。
+//
+// 本类型有意**不**标注 @MainActor——隔离标注统一推迟到 Task 17(原因见
+// SwiftyLabel.swift"存储属性"一节的说明:本模块内显式 @MainActor 在 Swift 5
+// 语言模式下会被强制执行,而 SwiftyToast(本类型的唯一调用方)同样要到
+// Task 17 才统一标注,这之前提早给 SwiftyToastCenter 加锁隔离只会制造
+// 桥接负担)。因此 add/finish/fire 目前仍可能被非主线程调用而与主线程读写
+// queueArray/isFinished 产生竞态。
+//
+// Task 17 给本类型加上 @MainActor 后,add/finish/fire 天然只在主线程执行,
+// 该竞态自动消除,无需额外改动——搜索本类型名即可定位。
 private final class SwiftyToastCenter {
   private var queueArray: [SwiftyToast] = []
   private var isFinished: Bool = true
