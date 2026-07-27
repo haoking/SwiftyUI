@@ -76,7 +76,9 @@ public final class ClosureWrapper<T> {
 }
 
 extension NSObject {
-  public final class func swizzleInstance(
+  /// 交换实例方法实现。属于库的实现细节,2.0 起不再公开(仅供
+  /// SwiftyUI.enableGlobalOpaqueOptimization() 内部调用)。
+  final class func swizzleInstance(
     _ originalSelector: Selector, _ swizzledSelector: Selector
   ) {
     guard let originalMethod = class_getInstanceMethod(self, originalSelector),
@@ -95,8 +97,11 @@ extension NSObject {
     }
   }
 
-  public final class func swizzleStatic(_ originalSelector: Selector, _ swizzledSelector: Selector)
-  {
+  /// 交换类方法实现。同上,2.0 起不再公开。
+  ///
+  /// 当前仓库内已无调用方(SwiftyButton 的 swizzle 已在 Task 14 移除)。
+  /// 是否继续保留交由最终审查裁定 —— 未删除,仅收紧可见性。
+  final class func swizzleStatic(_ originalSelector: Selector, _ swizzledSelector: Selector) {
     guard let swizzledClass = object_getClass(self),
       let originalMethod = class_getClassMethod(swizzledClass, originalSelector),
       let swizzledMethod = class_getClassMethod(swizzledClass, swizzledSelector)
