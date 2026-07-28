@@ -781,7 +781,7 @@ final class SwiftyPromiseTests: XCTestCase {
       "always 任务必须投递到注入的池上,不能落回 SwiftyThreadPool.default")
   }
 
-  /// value() 的 always 任务被取消时必须**抛错**,而不是永久挂死。
+  /// value() 的 always 任务被取消时必须**返回链条的最终值**,而不是永久挂死。
   ///
   /// 2.0 的行为:value() 把"恢复 continuation"这件事整个放进一个 always 任务里。
   /// 那个 operation 一旦在开始执行前被取消,它的执行块就不运行,ResumeGuard
@@ -789,9 +789,23 @@ final class SwiftyPromiseTests: XCTestCase {
   /// 超时、也不响应 Task 取消。SwiftyThreadPool 收到内存告警就会 removeAll(),
   /// 所以这在真机上够得着。
   ///
+  /// 为什么断言的是"返回值"而不是"抛 .cancelled":能走到 onCancelled 就说明
+  /// 链条**成功**终结了。每一条错误路径上 markError 都严格先于 fire() 的
+  /// .finish,内部错误处理器必定早已抢到 ResumeGuard;而登记与出错之间没有第三
+  /// 种交错(见 testValueRegistrationDoesNotSwallowConcurrentChainError),所以
+  /// onCancelled 一旦抢到 claim,currentValue 就是最终且正确的值。此时抛
+  /// `.cancelled` 等于把一个已经算好的正确结果丢掉去报一个"取消",与本次发布
+  /// 在链条任务上采纳的 `isCancelled && !didRun` 恰好背道而驰 —— 那条判定的
+  /// 全部理由就是"迟到的取消不该丢弃已经完成的工作"。
+  ///
+  /// 断言从"抛错"改成"返回值",判别力没有丢:这个测试真正钉住的是**不挂死**。
+  /// 删掉 value() 传给 .create 的 `onCancelled:` 参数,本测试仍然以 10 秒超时
+  /// 变红(已实测,见报告)。
+  ///
   /// 构造上有一个必须守住的点:链条本身要**成功**终结,只取消 value() 那一个
-  /// always 任务。若让链条出错,markError 会经 internalErrorHandler 恢复
-  /// continuation,这个测试不修也会绿 —— 那就什么都没测到。做法是把链条任务放到
+  /// always 任务。若让链条出错,markError 会经 internalErrorHandler **抢先**恢复
+  /// continuation,onCancelled 根本没有机会参与 —— 那就完全没测到要测的东西。
+  /// 做法是把链条任务放到
   /// .main 上(完全不经线程池),always 默认在 .background(经池),于是挂起的
   /// 池里排着的**只有** value() 那个 always 任务,removeAll() 取消的也只有它。
   ///
@@ -809,7 +823,7 @@ final class SwiftyPromiseTests: XCTestCase {
   /// 这个测试顺带钉住了另一件事:value() 的 always 任务必须投递到**注入的池**
   /// 上。它若落回 SwiftyThreadPool.default,下面 removeAll() 取消的就不是它,
   /// 本测试会以超时变红。
-  func testAsyncValueThrowsWhenItsAlwaysTaskIsCancelled() async throws {
+  func testAsyncValueReturnsValueWhenItsAlwaysTaskIsCancelled() async throws {
     let pool = SwiftyThreadPool()
     pool.stop()  // always 任务会排队但不开始
 
@@ -836,12 +850,14 @@ final class SwiftyPromiseTests: XCTestCase {
     pool.restart()
 
     do {
-      _ = try await waiter.value
-      XCTFail("always 任务被取消时 value() 必须抛错")
-    } catch let error as PromiseError {
-      XCTAssertEqual(error, .cancelled, "必须是 PromiseError.cancelled")
+      let value = try await waiter.value
+      XCTAssertEqual(
+        value, 1,
+        "always 任务被取消时链条已经成功终结,value() 必须返回它的最终值")
     } catch is TestTimeoutError {
       XCTFail("value() 挂死了 —— 正是本次要修的回归")
+    } catch {
+      XCTFail("链条成功终结,value() 不应抛错:\(error)")
     }
   }
 

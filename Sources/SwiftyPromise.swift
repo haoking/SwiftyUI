@@ -475,12 +475,21 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
   ///   `Promise<Void>.value()` 因此恒为 nil,不是 `()`。
   /// - Important: 这个 await **不响应** Swift Task 的取消:所在 Task 被
   ///   取消后,本方法仍会一直等到链条终结才返回或抛错。
-  /// - Important: 链条被取消、**且队列仍能继续排空**时(例如收到内存
+  /// - Important: **链条任务**被取消、**且队列仍能继续排空**时(例如收到内存
   ///   告警调用 removeAll(),而池未被挂起),本方法抛出 `PromiseError.cancelled`。
-  ///   这一点自 2.1 起成立;2.0 在这种情形下会永久挂起。
+  ///   这一点自 2.1 起成立;2.0 在这种情形下会返回上一步留下的陈旧值。
   ///   "队列仍能继续排空"这个前提是必要的:取消本身不会让 operation 结束,
   ///   是队列**跑到**它才让它结束的 —— 挂起的 OperationQueue 不会 finish
   ///   任何 operation,包括已被取消的,completionBlock 因此不会触发。
+  /// - Important: 被取消的若是本方法**自己那个用来恢复 continuation 的 always
+  ///   任务**,本方法照常返回链条的最终值,不抛错。理由与链条任务上
+  ///   `isCancelled && !didRun` 的判定是同一条:迟到的取消不该丢弃已经完成的
+  ///   工作。这里更强 —— always 任务在链条终结**之后**才投递,而每一条错误
+  ///   路径上 markError 都严格先于 fire() 的 .finish(任务体抛错是在任务体内
+  ///   同步调用,链条任务被取消是在 completionBlock 里先 markError 再 fire),
+  ///   所以内部错误处理器必定早已抢到 ResumeGuard;这个 onCancelled 一旦抢到,
+  ///   就说明链条是成功终结的,currentValue 是最终且正确的值。
+  ///   (2.0 在这种情形下永久挂起,因为 always 任务当时根本没有 completionBlock。)
   /// - Important: 如果链条因为别的原因永远无法终结,本方法仍然不会返回。
   ///   三种已知情形:
   ///   1. 线程池被 `stop()` 之后再没 `restart()` —— 队列根本不跑。
@@ -545,17 +554,22 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
       // 这个 await 就永远挂在那里 —— 没有超时,也不响应 Task 取消(见本方法
       // 文档注释)。这是 2.0 的实际行为,而 SwiftyThreadPool 收到内存告警就会
       // removeAll(),所以它在真机上够得着。fire() 的 .finish 分支现在会在
-      // operation 被取消时调用下面这个闭包,以 .cancelled 恢复 continuation。
+      // operation 被取消时调用下面这个闭包。
       //
-      // ResumeGuard 保证只恢复一次,所以"块正常跑完(返回当前值)"与"块被取消
-      // (抛 .cancelled)"这两条路径无论谁先到都是安全的 —— 与出错路径上 internalErrorHandler 和这个块
+      // 它以**当前值**恢复,而不是抛 .cancelled:能走到这里就说明链条已经成功
+      // 终结(论证见本方法文档注释最后一条 Important),丢弃一个已经算出来的
+      // 正确结果去报一个"取消",与本次发布在链条任务上采纳的
+      // `isCancelled && !didRun` 是同一条原则的反面。
+      //
+      // ResumeGuard 保证只恢复一次,所以"块正常跑完"与"块被取消"这两条路径
+      // 无论谁先到都是安全的 —— 与出错路径上 internalErrorHandler 和这个块
       // 相争时是同一套保证。
       let registration = registerValueWaiter(
         .create(
           nil, .background, alwaysOperation, runFlag: flag,
           onCancelled: {
             guard resumed.claim() else { return }
-            continuation.resume(throwing: PromiseError.cancelled)
+            continuation.resume(returning: self.currentValue)
           }),
         onError: { error in
           guard resumed.claim() else { return }
@@ -714,7 +728,7 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
         task.op.completionBlock = { [weak op = task.op] in
           if op?.isCancelled == true && !flag.didRun {
             // 用户经 always(_:) 追加的任务没有 onCancelled —— 链条已终结,
-            // 错误无处可去。只有 value() 会传,用来抛错恢复它的 continuation。
+            // 错误无处可去。只有 value() 会传,用来恢复它的 continuation。
             onCancelled?()
           }
         }
