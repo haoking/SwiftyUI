@@ -533,6 +533,20 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
     case .finish(let pending):
       // always 在链条终结之后才执行(B11)
       for task in pending {
+        // 与 .run 分支同理:只捕获 flag 与 onCancelled,不捕获 task。
+        //
+        // 这个 completionBlock 是 2.1 新加的。2.0 里 always 任务是"投递完就
+        // 不管"的,一旦被取消就彻底静默 —— 而 value() 恰恰把恢复 continuation
+        // 的逻辑放在一个 always 任务里,于是 await 永远挂在那里(见 Task 3)。
+        let flag = task.runFlag
+        let onCancelled = task.onCancelled
+        task.op.completionBlock = { [weak op = task.op] in
+          if op?.isCancelled == true && !flag.didRun {
+            // 用户经 always(_:) 追加的任务没有 onCancelled —— 链条已终结,
+            // 错误无处可去。只有 value() 会传,用来抛错恢复它的 continuation。
+            onCancelled?()
+          }
+        }
         task.start(on: pool)
       }
     case .nothing:
