@@ -81,4 +81,17 @@ final class SwiftyButtonTests: XCTestCase {
     button.btnTapped(button)
     XCTAssertEqual(tapCount, 2)
   }
+
+  /// 回归保护:init 中设置的 backgroundImage 必须真的到达 layer.contents。
+  ///
+  /// Swift 的属性观察器对"在本类自身初始化器中直接赋值自有存储属性"不触发,
+  /// 所以仅断言 button.backgroundImage != nil 是不够的 —— 那个值确实被存了,
+  /// 只是没有推给 layer。上面的 testInitAppliesTitleAndImage 正是只断言了
+  /// 存储属性,因而漏掉了这个回归(Task 19 在 iOSExample 里实跑才发现:按钮
+  /// 渲染成空白方块)。
+  func testInitPushesBackgroundImageToLayer() {
+    let image = TestSupport.makeSolidImage(color: .red)
+    let button = SwiftyButton("t", image, ClosureWrapper { _ in })
+    XCTAssertNotNil(button.layer.contents, "init 设置的图片必须到达 layer.contents")
+  }
 }

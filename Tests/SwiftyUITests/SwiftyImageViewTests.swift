@@ -25,4 +25,13 @@ final class SwiftyImageViewTests: XCTestCase {
     view.image = nil
     XCTAssertNil(view.layer.contents)
   }
+
+  /// 同 SwiftyButtonTests.testInitPushesBackgroundImageToLayer 的保护,针对
+  /// SwiftyImageView —— 它当前是安全的(init 经 image 计算属性间接赋值,
+  /// 观察器会触发),本测试确保将来有人把它改成直接赋值自有存储属性时能被发现。
+  func testImageViewInitPushesImageToLayer() {
+    let image = TestSupport.makeSolidImage(color: .green)
+    let view = SwiftyImageView(image)
+    XCTAssertNotNil(view.layer.contents, "init 设置的图片必须到达 layer.contents")
+  }
 }

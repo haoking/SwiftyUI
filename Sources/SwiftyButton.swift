@@ -41,7 +41,14 @@ public class SwiftyButton: UIControl, ImageSettable {
     alpha = 1.0
 
     titleLabel.text = title
+    // Swift 的属性观察器对"在本类自身的初始化器中直接赋值自有存储属性"不触发,
+    // 因此下面这行不会执行 backgroundImage 的 didSet,layer.contents 也就永远不会
+    // 被设置 —— 按钮会渲染成空白方块。必须显式调用一次。
+    //
+    // 对照:SwiftyImageView 经 image 计算属性间接赋值,其观察器会触发;
+    // SwiftyView 覆写的是超类属性,同样会触发。只有本类是直接赋值。
     backgroundImage = image
+    applyBackgroundImage(image)
     tapHandler = handler
     addTarget(self, action: #selector(btnTapped(_:)), for: .touchUpInside)
   }
