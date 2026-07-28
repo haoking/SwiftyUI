@@ -14,7 +14,17 @@ public final class SwiftyToast {
   ///
   /// 与 SwiftyAlertView 给自己的根视图设 `"SwiftyAlert"` 是同一件事、同一个用途:
   /// 让这个直接挂在 window 上、不属于任何 view controller 的视图可以被外部识别。
-  public static let accessibilityIdentifier: String = "SwiftyToast"
+  ///
+  /// **必须显式 nonisolated**:SwiftyToast 是 @MainActor 隔离的类型,
+  /// 类型成员默认继承这份隔离,`public static let` 也不例外。而这个常量存在的
+  /// 全部意义就是给 UI 自动化与外部工具用,那类代码通常是非隔离的 ——
+  /// 继承隔离会让它在自己唯一的目标场景里根本引用不了:
+  ///
+  ///     error: main actor-isolated class property 'accessibilityIdentifier'
+  ///     can not be referenced from a nonisolated context
+  ///
+  /// 一个不可变的 String 常量本来也没有任何需要主 actor 保护的可变状态。
+  public nonisolated static let accessibilityIdentifier: String = "SwiftyToast"
 
   private lazy var toastLabel: SwiftyLabel = { [unowned self] in
     var toastLabel = SwiftyLabel(nil, .white, .init(white: 0.0, alpha: 0.7))
