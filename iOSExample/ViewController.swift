@@ -18,6 +18,9 @@ class ViewController: UIViewController {
   override func viewDidLoad() {
     super.viewDidLoad()
 
+    // 2.0 起全局 isOpaque 优化默认关闭,需显式开启
+    SwiftyUI.enableGlobalOpaqueOptimization()
+
     let myView: SwiftyView = SwiftyView().addTo(view)
     myView.frame = CGRect(x: 50, y: 50, width: 100, height: 100)
     myView.backgroundColor = .black
@@ -101,9 +104,32 @@ class ViewController: UIViewController {
 
       print("Promise<Void>---error\(String(describing: error))")
     }
+
+    // Task 18 新增:Promise.value() 的 async 桥接形式,与上面的回调式链条并存
+    Task {
+      do {
+        let result = try await Promise<String>.firstly(on: .background) { (update, _) in
+
+          print("value()----task1----Thread:\(Thread.current)")
+          update("value()-demo")
+
+        }.then(with: nil, on: .main) { (update, str) in
+
+          print("value()----task2----Thread:\(Thread.current)----\(String(describing: str))")
+          update(str)
+
+        }.value()
+
+        print("Promise.value() result: \(String(describing: result))")
+      } catch {
+        print("Promise.value() error: \(error)")
+      }
+    }
   }
 
   func btnTappedSelector(_ sender: SwiftyButton) {
+    print("safeAreaInsets: \(SwiftyGlobal.safeAreaInsets)")
+
     var _ = SwiftyToast("btnTappedSelector")
 
     let alert: SwiftyAlertView = .create()
