@@ -109,8 +109,8 @@ jobs:
   lint-podspec:
     name: podspec 校验
     runs-on: macos-latest
-    # pod lib lint 目前预期会失败(见下),但会真正跑一次 xcodebuild 编译校验,
-    # 量级与构建库相当,给同样有数倍余量的上限。
+    # pod lib lint 会真正跑一次 xcodebuild 编译校验,量级与构建库相当,
+    # 给同样有数倍余量的上限。
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -155,7 +155,7 @@ jobs:
           xcodebuild -version
 
       - name: pod lib lint
-        # 预期失败:SwiftyUI.podspec 目前仍是 version 1.8.0 / ios.deployment_target 9.0,
-        # 且没有声明 swift_version,与源码实际要求(iOS 15+、Swift 6)不符。
-        # Task 21 会修正 podspec,这个 job 在那之前会持续失败,是已知状态。
+        # --allow-warnings:podspec 校验目前只剩非阻断性告警(源码本身的构建是
+        # 0 warning,见上面的"构建库"步骤)。这个 job 预期通过 —— 它一旦变红,
+        # 说明 podspec 与源码的实际要求(iOS 15+、Swift 6)又脱节了。
         run: pod lib lint --allow-warnings

@@ -77,6 +77,14 @@ Pod::Spec.new do |s|
   #  @MainActor isolation and structured concurrency introduced in Swift 6.
   s.swift_version = "6.0"
 
+  #  swift_version above is only honoured from CocoaPods 1.4.0 on. Older
+  #  versions silently ignore it and build the pod with whatever Swift version
+  #  the integrating project happens to use — which for this source means a
+  #  wall of concurrency errors rather than a clear "unsupported tool" message.
+  #  Declaring the floor turns that into an actionable error at `pod install`.
+  #  Kept in sync with the "CocoaPods 1.4.0+ is required" note in README.md.
+  s.cocoapods_version = ">= 1.4.0"
+
 
   # ――― Source Location ―――――――――――――――――――――――――――――――――――――――――――――――――――――――――― #
   #
