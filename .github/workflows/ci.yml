@@ -1,0 +1,161 @@
+name: CI
+
+# ―――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――
+# runner / Xcode 假设(写这份工作流时无法登录 GitHub 的 runner 验证,以下是尽调后
+# 的最佳判断,而非确定事实):
+#
+#   - runs-on 用 `macos-latest` 而不是固定的 `macos-15`。原因:固定一个具体版本号,
+#     一旦该版本号被 GitHub 下线,job 不会失败,而是永久排队等一个不存在的 runner——
+#     `timeout-minutes` 只在 job 开始运行后计时,对排队阶段不生效。这正是本次任务要
+#     极力避免的"无限等待"故障模式,所以这里用平台保证长期有效的别名。代价是行为
+#     可能随 GitHub 更新该别名而漂移;下面的诊断步骤让漂移在日志里可见,而不是变成
+#     诡异的失败。
+#   - 不固定具体的 /Applications/Xcode_16.app 路径。runner 上实际装了哪些 Xcode、
+#     叫什么名字,只有真跑一次才知道。改为:先打印全部已装 Xcode 版本,再动态选出
+#     版本号最高的一个并校验其 ≥ 16(Swift 6 语言模式的最低要求)。这与 Scripts/test.sh
+#     动态解析模拟器 UDID 是同一套思路——不硬编码在多个 runner 世代之间不稳定的名字。
+#   - 若这些假设有误,失败会发生在"选择 Xcode"这一步,报错信息里带着上一步打印的
+#     完整版本列表,可直接定位,不会是后面构建步骤里一条无关的编译错误。
+# ―――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――
+
+on:
+  push:
+    branches: [master, "feature/**"]
+  pull_request:
+    branches: [master]
+
+jobs:
+  build-and-test:
+    name: 构建与测试
+    runs-on: macos-latest
+    # 观察到的本地耗时:swift package describe < 1s,库构建(冷)几秒到两分钟量级,
+    # 单元测试(含模拟器启动)几秒到两分钟量级,示例工程构建约十秒到两分钟量级。
+    # 20 分钟对上述总和有数倍余量,同时远低于 GitHub 6 小时的默认上限。
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 列出 runner 上可用的 Xcode
+        # 不管后面选择 Xcode 是否成功,先把实情打进日志,方便和假设不符时排查。
+        run: |
+          echo "/Applications 下的 Xcode*.app:"
+          ls -d /Applications/Xcode*.app 2>/dev/null || echo "(未找到任何 Xcode*.app)"
+          echo
+          for app in /Applications/Xcode*.app; do
+            [ -d "$app" ] || continue
+            echo "== $app =="
+            "$app/Contents/Developer/usr/bin/xcodebuild" -version 2>/dev/null || echo "(无法读取版本)"
+          done
+
+      - name: 选择 Xcode(取本 runner 已装的最新版本)
+        # 不硬编码具体路径:同名/同版本号在不同 runner 世代之间并不稳定,
+        # 参见 Scripts/test.sh 对模拟器 UDID 的处理方式。
+        run: |
+          set -euo pipefail
+          best_path=""
+          best_version="0"
+          for app in /Applications/Xcode*.app; do
+            [ -d "$app" ] || continue
+            ver="$("$app/Contents/Developer/usr/bin/xcodebuild" -version 2>/dev/null | awk '/^Xcode/{print $2; exit}')"
+            [ -n "$ver" ] || continue
+            newer="$(printf '%s\n%s\n' "$ver" "$best_version" | sort -V | tail -1)"
+            if [ "$newer" = "$ver" ]; then
+              best_version="$ver"
+              best_path="$app"
+            fi
+          done
+          if [ -z "$best_path" ]; then
+            echo "错误:/Applications 下未找到任何可用的 Xcode,见上一步打印的列表。" >&2
+            exit 1
+          fi
+          major="${best_version%%.*}"
+          if [ "$major" -lt 16 ]; then
+            echo "错误:本 runner 上最新的是 Xcode $best_version,低于 Swift 6 语言模式所需的 Xcode 16。" >&2
+            echo "本库 Package.swift 的 swift-tools-version 为 6.0,必须在支持 Swift 6 的 Xcode 上构建。" >&2
+            exit 1
+          fi
+          echo "选用 $best_path (Xcode $best_version)"
+          sudo xcode-select -s "$best_path"
+          xcodebuild -version
+
+      - name: 校验 SPM 清单
+        # 不能用 swift build:本包仅依赖 UIKit,在 macOS 宿主上无法编译
+        run: swift package describe
+
+      - name: 构建库
+        run: Scripts/build.sh
+
+      - name: 运行单元测试
+        # 单独给这一步兜底一个比 job 总额度更紧的上限:Task 18 记录过一类 bug,
+        # 复发时的表现是异步测试永久挂起而不是失败退出。test.sh 内部目前没有任何
+        # 超时机制(裸 try await,无 XCTestExpectation 超时),所以这里的
+        # timeout-minutes 是这条回归路径当前唯一的兜底。10 分钟相对于本地观察到的
+        # 几秒到两分钟量级已有数倍余量。
+        timeout-minutes: 10
+        run: Scripts/test.sh
+
+      - name: 构建示例工程
+        run: |
+          set +e
+          xcodebuild build -scheme iOSExample \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath .build/xcode-example > .build/example.log 2>&1
+          status=$?
+          set -e
+          grep -E '^(/.*(error|warning):|\*\* BUILD)' .build/example.log || true
+          [ "$status" -eq 0 ] || tail -30 .build/example.log
+          exit "$status"
+
+  lint-podspec:
+    name: podspec 校验
+    runs-on: macos-latest
+    # pod lib lint 目前预期会失败(见下),但会真正跑一次 xcodebuild 编译校验,
+    # 量级与构建库相当,给同样有数倍余量的上限。
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 列出 runner 上可用的 Xcode
+        run: |
+          echo "/Applications 下的 Xcode*.app:"
+          ls -d /Applications/Xcode*.app 2>/dev/null || echo "(未找到任何 Xcode*.app)"
+          echo
+          for app in /Applications/Xcode*.app; do
+            [ -d "$app" ] || continue
+            echo "== $app =="
+            "$app/Contents/Developer/usr/bin/xcodebuild" -version 2>/dev/null || echo "(无法读取版本)"
+          done
+
+      - name: 选择 Xcode(取本 runner 已装的最新版本)
+        run: |
+          set -euo pipefail
+          best_path=""
+          best_version="0"
+          for app in /Applications/Xcode*.app; do
+            [ -d "$app" ] || continue
+            ver="$("$app/Contents/Developer/usr/bin/xcodebuild" -version 2>/dev/null | awk '/^Xcode/{print $2; exit}')"
+            [ -n "$ver" ] || continue
+            newer="$(printf '%s\n%s\n' "$ver" "$best_version" | sort -V | tail -1)"
+            if [ "$newer" = "$ver" ]; then
+              best_version="$ver"
+              best_path="$app"
+            fi
+          done
+          if [ -z "$best_path" ]; then
+            echo "错误:/Applications 下未找到任何可用的 Xcode,见上一步打印的列表。" >&2
+            exit 1
+          fi
+          major="${best_version%%.*}"
+          if [ "$major" -lt 16 ]; then
+            echo "错误:本 runner 上最新的是 Xcode $best_version,低于 Swift 6 语言模式所需的 Xcode 16。" >&2
+            exit 1
+          fi
+          echo "选用 $best_path (Xcode $best_version)"
+          sudo xcode-select -s "$best_path"
+          xcodebuild -version
+
+      - name: pod lib lint
+        # 预期失败:SwiftyUI.podspec 目前仍是 version 1.8.0 / ios.deployment_target 9.0,
+        # 且没有声明 swift_version,与源码实际要求(iOS 15+、Swift 6)不符。
+        # Task 21 会修正 podspec,这个 job 在那之前会持续失败,是已知状态。
+        run: pod lib lint --allow-warnings

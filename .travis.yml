@@ -1,4 +1,0 @@
-language: swift
-osx_image: xcode11.5
-script:
- - xcodebuild -scheme iOSExample -sdk iphonesimulator build
