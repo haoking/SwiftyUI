@@ -102,6 +102,12 @@ jobs:
         # 放在"构建库"之后:它需要现成的 SwiftyUI.swiftmodule。
         run: Scripts/check-readme.sh
 
+      - name: 校验依赖的 scheme 都已共享
+        # uitest.sh 与下面的"构建示例工程"都写 -scheme iOSExample。
+        # 这一步断言它来自 xcshareddata,而不是靠 xcodebuild 现场自动生成 ——
+        # 后者是未声明的依赖,内容隐式且会随 Xcode 版本漂移。
+        run: Scripts/check-shared-schemes.sh
+
       - name: 校验 uitest.sh 会还原模拟器全局偏好
         # uitest.sh 必须改本机全局的 ConnectHardwareKeyboard 才能让软件键盘出现
         # 在屏幕内,那是 Simulator.app 的机器级设置。这一步断言它跑完会原样还原,
