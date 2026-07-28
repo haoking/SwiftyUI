@@ -13,30 +13,81 @@ public enum ThreadPerform: Int {
   case background
 }
 
+/// Promise 自身产生的错误(区别于任务体抛出的业务错误)。
+public enum PromiseError: Error, Sendable, Equatable {
+  /// 支撑该任务的 Operation 在开始执行前被取消。
+  ///
+  /// 最常见的来源是 `SwiftyThreadPool` 收到内存告警后调用 `removeAll()`。
+  case cancelled
+
+  /// 链条正常终结,但没有任何任务调用过 `update(...)`,因此没有值可返回。
+  case noValue
+}
+
+/// 记录一个 operation 的执行块是否真的运行过。
+///
+/// 存在的理由:BlockOperation 的执行块不检查 isCancelled,所以取消若发生在
+/// 执行**期间**,工作其实已经完成 —— 此时把链条判为取消会丢弃一个有效结果。
+/// 判定条件因此是 `isCancelled && !didRun`,而不是单看 isCancelled。
+///
+/// Foundation 保证 completionBlock 在 operation 结束之后运行,因此在
+/// completionBlock 里读到的 didRun 一定反映了执行块是否跑过。
+///
+/// @unchecked Sendable 的理由与 ResumeGuard 一致:唯一的可变状态只经由
+/// lock 保护的临界区读写,编译器无法验证,故为 unchecked。
+private final class RunFlag: @unchecked Sendable {
+  private let lock = NSLock()
+  private var value = false
+
+  func markRun() {
+    lock.lock()
+    defer { lock.unlock() }
+    value = true
+  }
+
+  var didRun: Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    return value
+  }
+}
+
 private struct PromiseTask {
   var identifier: String?
   var perform: ThreadPerform
   var op: Operation
+  /// 与本任务的 op 一一对应,由 op 的执行块置位。
+  let runFlag: RunFlag
+  /// 仅 value() 传入:该 always 任务被取消时用来抛错恢复 continuation。
+  /// 用户经 always(_:) 追加的任务不设此项 —— 链条此时已终结,错误无处可去。
+  let onCancelled: (@Sendable () -> Void)?
 
-  private init(_ identifier: String? = nil, _ perform: ThreadPerform = .background, _ op: Operation)
-  {
+  private init(
+    _ identifier: String? = nil, _ perform: ThreadPerform = .background, _ op: Operation,
+    _ runFlag: RunFlag, _ onCancelled: (@Sendable () -> Void)?
+  ) {
     self.identifier = identifier
     self.perform = perform
     self.op = op
+    self.runFlag = runFlag
+    self.onCancelled = onCancelled
   }
 
   static func create(
-    _ identifier: String? = nil, _ perform: ThreadPerform = .background, _ op: Operation
+    _ identifier: String? = nil, _ perform: ThreadPerform = .background, _ op: Operation,
+    runFlag: RunFlag, onCancelled: (@Sendable () -> Void)? = nil
   ) -> PromiseTask {
-    return PromiseTask(identifier, perform, op)
+    return PromiseTask(identifier, perform, op, runFlag, onCancelled)
   }
 
-  func start() {
+  /// 池由调用方传入而不是直接取 SwiftyThreadPool.default:取消语义必须能在
+  /// 一个与其他测试隔离的池上验证。对外的公开 API 一律仍走共享单例。
+  func start(on pool: SwiftyThreadPool) {
     switch perform {
     case .main:
       OperationQueue.main.addOperation(op)
     case .background:
-      SwiftyThreadPool.default.add(op, withIdentifier: identifier)
+      pool.add(op, withIdentifier: identifier)
     }
   }
 }
@@ -59,6 +110,13 @@ private enum PromiseNext {
 public final class Promise<T: Sendable>: @unchecked Sendable {
   /// 保护下方全部可变状态。所有临界区都很短,串行队列足够,不需要更复杂的方案。
   private let stateQueue = DispatchQueue(label: "me.haoking.SwiftyPromise.state")
+
+  /// 承载 `.background` 任务的线程池。
+  ///
+  /// internal 且默认是共享单例:公开 API 完全看不到这个参数,行为与 2.0 一致。
+  /// 它存在的唯一理由是测试 —— 取消语义必须在一个与其他测试隔离的池上验证,
+  /// 否则要么去挂起进程级单例(污染别的测试),要么测试根本碰不到被测的那条链。
+  internal let pool: SwiftyThreadPool
 
   private var tasks: [PromiseTask] = []
   private var alwaysTasks: [PromiseTask] = []
@@ -116,10 +174,16 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
 
   // MARK: - 任务构建
 
-  private func operationBuild(_ work: (@Sendable () throws -> Void)?) -> Operation {
+  private func operationBuild(_ work: (@Sendable () throws -> Void)?) -> (
+    op: Operation, flag: RunFlag
+  ) {
+    let flag = RunFlag()
     // 这里不持有 self:链条运行期间的强引用由 fire() 在投递时挂到
     // operation 的 completionBlock 上,详见 fire()
-    return BlockOperation { [weak self] in
+    let op = BlockOperation { [weak self] in
+      // 必须是块内第一句:哪怕 self 已经没了,"这个块运行过"也是事实,
+      // 否则 completionBlock 会把它误判为取消。
+      flag.markRun()
       guard let self = self else { return }
       do {
         try work?()
@@ -127,12 +191,15 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
         self.markError(error)
       }
     }
+    return (op, flag)
   }
 
   private func operationBuildT(
     _ work: @escaping @Sendable (_ update: (T?) -> Void, _ value: T?) throws -> Void
-  ) -> Operation {
-    return BlockOperation { [weak self] in
+  ) -> (op: Operation, flag: RunFlag) {
+    let flag = RunFlag()
+    let op = BlockOperation { [weak self] in
+      flag.markRun()
       guard let self = self else { return }
       do {
         try work(self.update, self.currentValue)
@@ -140,23 +207,29 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
         self.markError(error)
       }
     }
+    return (op, flag)
   }
 
   // MARK: - 构造
 
   // init 期间还没有第二个线程能看到 self,直接写 tasks 是安全的
   private init(
-    _ identifier: String? = nil, _ perform: ThreadPerform = .background,
-    _ work: (@Sendable () throws -> Void)?
+    pool: SwiftyThreadPool, _ identifier: String? = nil,
+    _ perform: ThreadPerform = .background, _ work: (@Sendable () throws -> Void)?
   ) {
-    tasks.append(.create(identifier, perform, operationBuild(work)))
+    self.pool = pool
+    let built = operationBuild(work)
+    tasks.append(.create(identifier, perform, built.op, runFlag: built.flag))
   }
 
   private init(
-    _ identifier: String? = nil, _ perform: ThreadPerform = .background,
+    pool: SwiftyThreadPool, _ identifier: String? = nil,
+    _ perform: ThreadPerform = .background,
     work: @escaping @Sendable (_ update: (T?) -> Void, _ value: T?) throws -> Void
   ) {
-    tasks.append(.create(identifier, perform, operationBuildT(work)))
+    self.pool = pool
+    let built = operationBuildT(work)
+    tasks.append(.create(identifier, perform, built.op, runFlag: built.flag))
   }
 
   @discardableResult
@@ -164,7 +237,7 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
     with identifier: String? = nil, on perform: ThreadPerform = .background,
     _ work: (@Sendable () throws -> Void)?
   ) -> Promise {
-    return Promise(identifier, perform, work)
+    return Promise(pool: .default, identifier, perform, work)
   }
 
   @discardableResult
@@ -172,7 +245,27 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
     with identifier: String? = nil, on perform: ThreadPerform = .background,
     work: @escaping @Sendable (_ update: (T?) -> Void, _ value: T?) throws -> Void
   ) -> Promise {
-    return Promise(identifier, perform, work: work)
+    return Promise(pool: .default, identifier, perform, work: work)
+  }
+
+  /// 供测试注入一个隔离的线程池。不是公开 API。
+  @discardableResult
+  internal class func firstly(
+    pool: SwiftyThreadPool, with identifier: String? = nil,
+    on perform: ThreadPerform = .background,
+    _ work: (@Sendable () throws -> Void)?
+  ) -> Promise {
+    return Promise(pool: pool, identifier, perform, work)
+  }
+
+  /// 供测试注入一个隔离的线程池。不是公开 API。
+  @discardableResult
+  internal class func firstly(
+    pool: SwiftyThreadPool, with identifier: String? = nil,
+    on perform: ThreadPerform = .background,
+    work: @escaping @Sendable (_ update: (T?) -> Void, _ value: T?) throws -> Void
+  ) -> Promise {
+    return Promise(pool: pool, identifier, perform, work: work)
   }
 
   // MARK: - 链式
@@ -182,7 +275,8 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
     with identifier: String? = nil, on perform: ThreadPerform = .background,
     _ work: (@Sendable () throws -> Void)?
   ) -> Promise {
-    withState { tasks.append(.create(identifier, perform, operationBuild(work))) }
+    let built = operationBuild(work)
+    withState { tasks.append(.create(identifier, perform, built.op, runFlag: built.flag)) }
     return self
   }
 
@@ -191,7 +285,8 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
     with identifier: String? = nil, on perform: ThreadPerform = .background,
     work: @escaping @Sendable (_ update: (T?) -> Void, _ value: T?) throws -> Void
   ) -> Promise {
-    withState { tasks.append(.create(identifier, perform, operationBuildT(work))) }
+    let built = operationBuildT(work)
+    withState { tasks.append(.create(identifier, perform, built.op, runFlag: built.flag)) }
     return self
   }
 
@@ -202,8 +297,12 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
   ) -> Promise {
     // always 的 operation 不参与 fire() 链条,完成后无需推进;
     // 此时链条已终结,再抛错也无处可去,直接吞掉
-    let operation = BlockOperation { _ = try? work?() }
-    withState { alwaysTasks.append(.create(identifier, perform, operation)) }
+    let flag = RunFlag()
+    let operation = BlockOperation {
+      flag.markRun()
+      _ = try? work?()
+    }
+    withState { alwaysTasks.append(.create(identifier, perform, operation, runFlag: flag)) }
     return self
   }
 
@@ -281,7 +380,9 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
       // completionBlock 触发的下一次 fire())。
       let resumed = ResumeGuard()
 
+      let flag = RunFlag()
       let alwaysOperation = BlockOperation {
+        flag.markRun()
         // 强引用 self,不用 [weak self]——这是防御性的,不是纠正性的:
         // self 是这次正在进行的 async 调用(value() 本身)的接收者,按
         // Swift 的调用约定,在整个 await 期间(包括跨越挂起点)都会被
@@ -308,7 +409,8 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
       // (appendAlwaysIfUnfinished 内部经 withState),否则只是把竞争
       // 窗口缩小,而不是消除:如果先查后加,fire() 可能恰好在两次访问
       // 之间把 alwaysTasks 排空,让这次追加白追加。
-      guard appendAlwaysIfUnfinished(.create(nil, .background, alwaysOperation)) else {
+      guard appendAlwaysIfUnfinished(.create(nil, .background, alwaysOperation, runFlag: flag))
+      else {
         // 链条已经终结:上面这个 always 任务永远不会被 fire() 排空到,
         // 也就永远不会执行。立即以当前值恢复,也不必登记任何错误处理器 ——
         // 链条已经终结,不会再产生新的错误。
@@ -396,12 +498,26 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
       // 已投递的 operation 是链条运行期间对 self 的唯一强引用:调用方不持有
       // Promise 时链条也能跑完。它不构成循环引用——task 在上面的临界区里已被
       // 移出 tasks,operation 完成后由队列释放,强引用随之解除。
-      task.op.completionBlock = { self.fire() }
-      task.start()
+      //
+      // 只捕获 flag,**不要**捕获 task:task 持有 op,把它捕进 op 自己的
+      // completionBlock 会造成 op → completionBlock → task → op 的环 ——
+      // 正是下面 [weak op] 想避免的东西。RunFlag 不引用 op,捕获它是安全的。
+      let flag = task.runFlag
+      task.op.completionBlock = { [weak op = task.op] in
+        // isCancelled 单独成立不够:取消若发生在执行期间,工作其实已完成,
+        // 此时判为取消会丢弃一个有效结果(见 RunFlag 的说明)。
+        if op?.isCancelled == true && !flag.didRun {
+          // markError 置 isError,紧接着的 fire() 会走 isError 分支丢弃剩余
+          // 任务并终结 —— 复用既有的错误终结路径,不新增状态。
+          self.markError(PromiseError.cancelled)
+        }
+        self.fire()
+      }
+      task.start(on: pool)
     case .finish(let pending):
       // always 在链条终结之后才执行(B11)
       for task in pending {
-        task.start()
+        task.start(on: pool)
       }
     case .nothing:
       break

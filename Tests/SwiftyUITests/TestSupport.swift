@@ -161,3 +161,31 @@ final class Box<Value: Sendable>: @unchecked Sendable {
     }
   }
 }
+
+/// 测试里跨线程读写单个值的小盒子。
+///
+/// 与上面的 Box 的区别只在类型参数上:Box 要求 `Value: Sendable`,而取消测试
+/// 要装的是 `Error?` —— `any Error` **不是** Sendable,`Box<Error?>` 根本编译
+/// 不过。此处刻意不加约束:装进来的东西只在锁保护的临界区里交接,跨线程搬运
+/// 的安全性由这把锁而不是类型系统提供。
+///
+/// @unchecked Sendable 的理由与库内的 ResumeGuard 一致:唯一的可变状态
+/// 只经由 lock 保护的临界区读写,编译器无法验证,故为 unchecked。
+final class Locked<T>: @unchecked Sendable {
+  private let lock = NSLock()
+  private var value: T
+
+  init(_ initial: T) { self.value = initial }
+
+  func get() -> T {
+    lock.lock()
+    defer { lock.unlock() }
+    return value
+  }
+
+  func set(_ newValue: T) {
+    lock.lock()
+    defer { lock.unlock() }
+    value = newValue
+  }
+}

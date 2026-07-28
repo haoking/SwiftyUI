@@ -545,4 +545,73 @@ final class SwiftyPromiseTests: XCTestCase {
       caughtByCatch.value,
       "value() 之后登记的 catch 处理器也必须收到错误")
   }
+
+  // MARK: - 取消(2.1)
+
+  /// 链条中的任务在开始执行前被取消 → catch 收到 PromiseError.cancelled,
+  /// 且后续任务不再执行。
+  ///
+  /// 2.0 的行为是:被取消的 operation 不执行自己的块就直接结束,
+  /// completionBlock 照样推进 fire(),于是链条**跳过这一步、带着陈旧的值
+  /// 继续跑完后续任务、最后以"成功"终结** —— 调用方完全看不出取消发生过。
+  ///
+  /// 全程在一个**独立**的线程池上进行:先挂起它,让 operation 排队但不开始,
+  /// 再按 identifier 精确取消我们自己那一个,然后放行。不碰
+  /// SwiftyThreadPool.default —— 那是进程级单例,动它会污染别的测试。
+  ///
+  /// 时序不靠 sleep:`catch(_:)` 是终结符,它同步走完
+  /// beginIfNeeded() → fire() → task.start(on:),返回时第一个 operation 必然
+  /// 已经排在池子里;而池子是挂起的,它不可能已经开始执行。下面的 remove
+  /// 因此确定地命中"已排队、未开始"这一格,而不是碰运气。
+  func testCancelledTaskFailsChainWithCancelledError() {
+    let pool = SwiftyThreadPool()
+    pool.stop()
+
+    let secondTaskRan = Locked(false)
+    let received = Locked<Error?>(nil)
+    let settled = XCTestExpectation(description: "chain settles")
+
+    let promise = Promise<Int>.firstly(pool: pool, with: "first", on: .background) { (update, _) in
+      update(1)
+    }.then(on: .background) { (_, _) in
+      secondTaskRan.set(true)
+    }
+
+    promise.catch { error in
+      received.set(error)
+      settled.fulfill()
+    }
+
+    // 此时第一个 operation 已排队在挂起的池里。精确取消它。
+    XCTAssertTrue(pool.remove(withIdentifier: "first"), "应当找到并取消排队中的第一个 operation")
+    pool.restart()
+
+    wait(for: [settled], timeout: 20)
+    XCTAssertEqual(
+      received.get() as? PromiseError, .cancelled,
+      "被取消的任务必须让链条以 PromiseError.cancelled 失败")
+    XCTAssertFalse(secondTaskRan.get(), "链条已因取消而终结,后续任务不得执行")
+  }
+
+  /// 取消发生在执行**期间**时,工作其实已经完成 —— 不得因此丢弃有效结果。
+  /// 判定条件是 isCancelled && !didRun,不是单看 isCancelled。
+  ///
+  /// 这是上一个测试的反面约束,两者共同钉死判定条件的形状:少了 isCancelled
+  /// 上一个测试红,少了 !didRun 这一个红。这里 removeAll() 在任务体**内部**
+  /// 调用,此时本 operation 还在 queue.operations 里(尚未 finish),因此它自己
+  /// 也会被 cancel —— 正是"取消发生在执行期间"这一格。BlockOperation 的块不
+  /// 检查 isCancelled,update(42) 已经完整执行,这份结果不该被丢弃。
+  func testCancelDuringExecutionDoesNotDiscardCompletedWork() async throws {
+    let pool = SwiftyThreadPool()
+
+    let promise = Promise<Int>.firstly(pool: pool, on: .background) { (update, _) in
+      update(42)
+      // 任务体跑完之后才取消:BlockOperation 的块不检查 isCancelled,
+      // 所以这份工作是完整完成的,不该因为一个迟到的 cancel 被丢弃。
+      pool.removeAll()
+    }
+
+    let value = try await withTestTimeout { try await promise.value() }
+    XCTAssertEqual(value, 42, "取消发生在执行期间时工作已完成,结果不得被丢弃")
+  }
 }
