@@ -684,4 +684,64 @@ final class SwiftyPromiseTests: XCTestCase {
       foundItselfInInjectedPool.value, true,
       "always 任务必须投递到注入的池上,不能落回 SwiftyThreadPool.default")
   }
+
+  /// value() 的 always 任务被取消时必须**抛错**,而不是永久挂死。
+  ///
+  /// 2.0 的行为:value() 把"恢复 continuation"这件事整个放进一个 always 任务里。
+  /// 那个 operation 一旦在开始执行前被取消,它的执行块就不运行,ResumeGuard
+  /// 永远不会被 claim —— `try await promise.value()` 就永久挂在那里,没有任何
+  /// 超时、也不响应 Task 取消。SwiftyThreadPool 收到内存告警就会 removeAll(),
+  /// 所以这在真机上够得着。
+  ///
+  /// 构造上有一个必须守住的点:链条本身要**成功**终结,只取消 value() 那一个
+  /// always 任务。若让链条出错,markError 会经 internalErrorHandler 恢复
+  /// continuation,这个测试不修也会绿 —— 那就什么都没测到。做法是把链条任务放到
+  /// .main 上(完全不经线程池),always 默认在 .background(经池),于是挂起的
+  /// 池里排着的**只有** value() 那个 always 任务,removeAll() 取消的也只有它。
+  ///
+  /// 时序不靠 sleep 一个魔法时长,而是轮询 `pool.count` 等它真的排进池里。
+  /// 这里不能改用轮询 Promise 内部的 alwaysTasks:那个数组在 fire() 走到
+  /// .finish 时就被排空并转交给池,它非空的窗口是"已 append、链条尚未终结",
+  /// 恰恰在 always 任务进池**之前**。实测下来 .main 上那一步跑得比 10ms 的
+  /// 轮询间隔还快,该计数恒为 0(轮询会一直空转到 deadline);而即使侥幸读到
+  /// 非 0,那时 always 任务还没进池,removeAll() 什么也取消不到。pool.count
+  /// 观察的才是本测试真正依赖的那个事件。
+  ///
+  /// 必须包 withTestTimeout:这条路径回归时的表现就是挂死,不加超时的话
+  /// 测试会挂住整个测试进程而不是失败 —— 那正是要防的东西。
+  ///
+  /// 这个测试顺带钉住了另一件事:value() 的 always 任务必须投递到**注入的池**
+  /// 上。它若落回 SwiftyThreadPool.default,下面 removeAll() 取消的就不是它,
+  /// 本测试会以超时变红。
+  func testAsyncValueThrowsWhenItsAlwaysTaskIsCancelled() async throws {
+    let pool = SwiftyThreadPool()
+    pool.stop()  // always 任务会排队但不开始
+
+    let promise = Promise<Int>.firstly(pool: pool, on: .main) { (update, _) in
+      update(1)
+    }
+
+    let waiter = Task { try await withTestTimeout(10) { try await promise.value() } }
+
+    // 等链条把 .main 上的任务跑完、并把 always 任务投递到(挂起的)池里。
+    let deadline = Date().addingTimeInterval(5)
+    while pool.count == 0 && Date() < deadline {
+      try await Task.sleep(nanoseconds: 10_000_000)
+    }
+    XCTAssertEqual(
+      pool.count, 1,
+      "value() 的 always 任务应当已排在这个挂起的池里;为 0 说明它根本没进这个池")
+
+    XCTAssertTrue(pool.removeAll(), "应当取消到排队中的 always 任务")
+    pool.restart()
+
+    do {
+      _ = try await waiter.value
+      XCTFail("always 任务被取消时 value() 必须抛错")
+    } catch let error as PromiseError {
+      XCTAssertEqual(error, .cancelled, "必须是 PromiseError.cancelled")
+    } catch is TestTimeoutError {
+      XCTFail("value() 挂死了 —— 正是本次要修的回归")
+    }
+  }
 }

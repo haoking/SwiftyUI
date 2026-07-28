@@ -378,9 +378,11 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
   ///   `Promise<Void>.value()` 因此恒为 nil,不是 `()`。
   /// - Important: 这个 await **不响应** Swift Task 的取消:所在 Task 被
   ///   取消后,本方法仍会一直等到链条终结才返回或抛错。
-  /// - Important: 如果链条本身永远无法终结(例如 SwiftyThreadPool 被
-  ///   cancel()/stop() 导致后续 operation 不再执行),本方法也永远不会
-  ///   返回。
+  /// - Important: 链条被取消时(例如 SwiftyThreadPool 收到内存告警调用
+  ///   removeAll()),本方法抛出 `PromiseError.cancelled`。这一点自 2.1 起
+  ///   成立;2.0 在这种情形下会永久挂起。
+  /// - Important: 如果链条因为别的原因永远无法终结(例如线程池被 stop()
+  ///   之后再没 restart()),本方法仍然不会返回。
   public func value() async throws -> T? {
     return try await withCheckedThrowingContinuation { continuation in
       // 用一个 box 保证 continuation 只被恢复一次:链条正常结束与出错
@@ -420,7 +422,25 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
       // (appendAlwaysIfUnfinished 内部经 withState),否则只是把竞争
       // 窗口缩小,而不是消除:如果先查后加,fire() 可能恰好在两次访问
       // 之间把 alwaysTasks 排空,让这次追加白追加。
-      guard appendAlwaysIfUnfinished(.create(nil, .background, alwaysOperation, runFlag: flag))
+      //
+      // onCancelled 是"取消 → 不再挂死"的最后一环:上面那个 alwaysOperation
+      // 一旦在开始执行前被取消,它的执行块就不运行,resumed 永远不会被 claim,
+      // 这个 await 就永远挂在那里 —— 没有超时,也不响应 Task 取消(见本方法
+      // 文档注释)。这是 2.0 的实际行为,而 SwiftyThreadPool 收到内存告警就会
+      // removeAll(),所以它在真机上够得着。fire() 的 .finish 分支现在会在
+      // operation 被取消时调用下面这个闭包,以 .cancelled 恢复 continuation。
+      //
+      // ResumeGuard 保证只恢复一次,所以"块正常跑完(返回当前值)"与"块被取消
+      // (抛 .cancelled)"这两条路径无论谁先到都是安全的 —— 与出错路径上
+      // internalErrorHandler 和这个块相争时是同一套保证。
+      guard
+        appendAlwaysIfUnfinished(
+          .create(
+            nil, .background, alwaysOperation, runFlag: flag,
+            onCancelled: {
+              guard resumed.claim() else { return }
+              continuation.resume(throwing: PromiseError.cancelled)
+            }))
       else {
         // 链条已经终结:上面这个 always 任务永远不会被 fire() 排空到,
         // 也就永远不会执行。立即以当前值恢复,也不必登记任何错误处理器 ——
