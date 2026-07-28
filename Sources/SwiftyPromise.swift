@@ -21,6 +21,11 @@ public enum PromiseError: Error, Sendable, Equatable {
   case cancelled
 
   /// 链条正常终结,但没有任何任务调用过 `update(...)`,因此没有值可返回。
+  ///
+  /// Promise 自己**从不**抛出它 —— `value()` 在这种情形下返回 nil。它是给
+  /// "必须给出一个非可选结果"的桥接方法用的:目前唯一的抛出点是
+  /// `UIImage.colors()`,它把 `value()` 的 nil 转成这个错误,而不是强解包
+  /// (本库已有 B1、B19 两个强解包崩溃,不再添第三个)。
   case noValue
 }
 
@@ -415,14 +420,16 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
   /// - Important: 如果链条因为别的原因永远无法终结,本方法仍然不会返回。
   ///   三种已知情形:
   ///   1. 线程池被 `stop()` 之后再没 `restart()` —— 队列根本不跑。
-  ///   2. 线程池在本链条投递**之前**就被 `cancel()` 过 —— `add()` 内部的
-  ///      `guard let queue = currentQueue` 直接放弃,operation 根本没有进过
-  ///      任何队列,也就永远不会有 completionBlock。
+  ///   2. 线程池被 `cancel()` 过 —— 此后 `add()` 内部的
+  ///      `guard let queue = currentQueue` 一律直接放弃,operation 根本没有
+  ///      进过任何队列,也就永远不会有 completionBlock。注意这不限于"投递
+  ///      之前":`cancel()` 之后本链条的**任何**后续后台任务都会就此搁浅,
+  ///      哪怕前面几步已经跑完。
   ///   3. 池在**挂起状态**下被 `removeAll()` 或 `cancel()` —— 被取消的
   ///      operation 在队列恢复之前不会 finish。其中 `cancel()` 这条尤其
   ///      要命:它把 queue 置 nil,而 `restart()` 是 `currentQueue?.isSuspended
   ///      = false`,对 nil 是空操作 —— 这条路径**再也无法恢复**。
-  ///      (第 3 条的行为修复不在 2.1 范围内,见仓库 issue。)
+  ///      (第 2、3 条的行为修复不在 2.1 范围内,见 issue #6。)
   public func value() async throws -> T? {
     return try await withCheckedThrowingContinuation { continuation in
       // 用一个 box 保证 continuation 只被恢复一次:链条正常结束与出错
