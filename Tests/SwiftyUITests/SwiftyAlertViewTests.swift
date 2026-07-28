@@ -136,6 +136,38 @@ final class SwiftyAlertViewTests: XCTestCase {
     XCTAssertFalse(alert.keyboardHasBeenShown)
   }
 
+  /// 键盘**还弹着**的时候收起 alert,不能留下过期的键盘簿记。
+  ///
+  /// tmpContentViewFrameOrigin / tmpCircleViewFrameOrigin / keyboardHasBeenShown
+  /// 由显示观察者写入、由**隐藏**观察者清理。而 hideView() 把
+  /// removeKeyboardObservers() 提到了消失动画之前,所以这条路径上隐藏观察者
+  /// 在键盘真正收起之前就已经被撤销 —— 它的清理永远不会发生。
+  ///
+  /// testKeyboardAvoidanceFollowsShowHideLifecycle 覆盖不到这里:那条用例在
+  /// 调用 hideView() 之前先 post 了 keyboardWillHide,隐藏观察者还活着,
+  /// 三个字段是被它清干净的。本用例特意**不**收键盘就直接 hideView()。
+  ///
+  /// 判别力:把 removeKeyboardObservers() 末尾那三行重置删掉,后三条断言全红。
+  func testHidingWhileKeyboardIsUpLeavesNoStaleKeyboardState() {
+    let alert = makeShowingAlert()
+
+    postKeyboardWillShow()
+    XCTAssertTrue(alert.keyboardHasBeenShown, "前提:键盘已弹起并被记录,否则本测试无判别力")
+    XCTAssertNotNil(alert.tmpContentViewFrameOrigin, "前提:原始 origin 已被保存")
+    XCTAssertNotNil(alert.tmpCircleViewFrameOrigin)
+
+    // 不 post keyboardWillHide —— 键盘仍然弹着,此时收起 alert。
+    alert.hideView()
+
+    XCTAssertFalse(
+      alert.keyboardHasBeenShown,
+      "撤销观察者时必须一并清掉 keyboardHasBeenShown —— 它的清理者(隐藏观察者)已经被撤销了")
+    XCTAssertNil(
+      alert.tmpContentViewFrameOrigin,
+      "撤销观察者时必须一并清掉 tmpContentViewFrameOrigin,否则撤销走一半、留一半")
+    XCTAssertNil(alert.tmpCircleViewFrameOrigin, "撤销观察者时必须一并清掉 tmpCircleViewFrameOrigin")
+  }
+
   /// 无 window 时 showTitle 提前返回,这条路径上不应注册任何观察者
   /// (注册排在 keyWindow 守卫之后)—— 注册与撤销必须在每条出口上成对。
   func testShowTitleWithoutWindowRegistersNoObservers() {

@@ -383,7 +383,7 @@ public final class SwiftyAlertView: UIViewController {
     }
   }
 
-  /// 撤销两个键盘观察者。可重复调用:token 撤销后立刻置 nil。
+  /// 撤销两个键盘观察者,并清掉它们留下的簿记。可重复调用:token 撤销后立刻置 nil。
   ///
   /// 之所以必须按 token 撤销而不是 `removeObserver(self, name:)`:见上方
   /// keyboardWillShowObserver 的说明(B21)。观察者只持 `[weak self]`,所以
@@ -391,6 +391,18 @@ public final class SwiftyAlertView: UIViewController {
   /// 每展示一次 alert 就多两个,进程生命周期内只增不减,且每次键盘事件都会
   /// 把它们**全部**触发一遍。这与两个 block 内的 MainActor.assumeIsolated 复合
   /// 更糟:后台线程 post 键盘通知会 trap,而 trap 点数量随展示次数单调增长。
+  ///
+  /// **为什么这里要顺手清 tmp*FrameOrigin 与 keyboardHasBeenShown**:
+  /// 这三个字段是显示观察者写、隐藏观察者清的一份中间状态,它们和这两个 token
+  /// 是同一份状态的两半。而 hideView() 把撤销提到了消失动画**之前**(见那里的
+  /// 说明),于是"键盘还弹着就关掉 alert"这条路径上,隐藏观察者在键盘真正收起
+  /// 之前就已经被撤销 —— 它的清理永远不会发生,三个字段全部残留。
+  /// 撤销走一半、留一半,等于把状态交给一个已经不存在的清理者。
+  /// 在这里一并清掉,"注册/撤销不留残留"这条不变量才在每条路径上都成立。
+  ///
+  /// 只清簿记、不还原 frame 是有意的:走到这里要么是 alert 正在消失(还原一个
+  /// 马上就要被移除的视图没有意义,还会和消失动画打架),要么是 addKeyboardObservers()
+  /// 在重新注册前先清场(那时本就该从干净状态开始)。
   func removeKeyboardObservers() {
     if let observer = keyboardWillShowObserver {
       NotificationCenter.default.removeObserver(observer)
@@ -400,6 +412,9 @@ public final class SwiftyAlertView: UIViewController {
       NotificationCenter.default.removeObserver(observer)
       keyboardWillHideObserver = nil
     }
+    tmpContentViewFrameOrigin = nil
+    tmpCircleViewFrameOrigin = nil
+    keyboardHasBeenShown = false
   }
 
   override public func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
