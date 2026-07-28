@@ -37,6 +37,8 @@ class ViewController: UIViewController {
 
   private var events: [String] = []
 
+  private var debounceTapCount: Int = 0
+
   /// 打印一条事件,并追加到屏幕上的事件回显。
   private func logEvent(_ text: String) {
     print(text)
@@ -86,6 +88,30 @@ class ViewController: UIViewController {
     myBtn.accessibilityTraits = .button
     myBtn.accessibilityLabel = "Button"
     myBtn.accessibilityIdentifier = "MainButton"
+
+    // 防抖演示。回调只往 EventLog 记一条,**不遮挡屏幕**。
+    //
+    // 为什么不能拿上面那个主按钮演示防抖:它一点就 addSubview 一个覆盖整个 window
+    // 的 alert(showTitle 是同步的),后面两次快速点击全都打在 alert 上,根本到不了
+    // 按钮 —— 那种情况下"只触发一次"是被遮挡的结果,与 ignoreEventInterval 是否
+    // 生效毫无关系。实测把 ignoreEventInterval 设为 0(等于关掉防抖),
+    // 三连击主按钮**依然**只触发一次。
+    let debounceBtn: SwiftyButton = SwiftyButton(
+      "Debounce", nil,
+      ClosureWrapper({ [weak self] (_) in
+
+        guard let strongSelf = self else { return }
+        strongSelf.debounceTapCount += 1
+        strongSelf.logEvent("DebounceTap#\(strongSelf.debounceTapCount)")
+      })
+    ).addTo(view)
+    debounceBtn.frame = CGRect(x: 290, y: 280, width: 100, height: 100)
+    debounceBtn.backgroundColor = .darkGray
+    debounceBtn.titleLabel.textColor = .white
+    debounceBtn.isAccessibilityElement = true
+    debounceBtn.accessibilityTraits = .button
+    debounceBtn.accessibilityLabel = "Debounce"
+    debounceBtn.accessibilityIdentifier = "DebounceButton"
 
     eventLog.addTo(view)
     eventLog.frame = CGRect(x: 170, y: 50, width: max(view.bounds.width - 190, 100), height: 220)

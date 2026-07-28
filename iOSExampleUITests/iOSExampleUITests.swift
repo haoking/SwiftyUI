@@ -201,34 +201,43 @@ final class iOSExampleUITests: XCTestCase {
 
   // MARK: - 验收行:三次快速点击只触发一次(SwiftyButton 防抖)
 
+  /// 在**不遮挡屏幕**的那个按钮上验证防抖。
+  ///
+  /// 为什么不用主按钮:主按钮的回调是同步 addSubview 一个覆盖整个 window 的 alert,
+  /// 第二、三次点击全都打在 alert 上,根本到不了按钮。那样"只触发一次"是遮挡的
+  /// 结果,与 ignoreEventInterval 无关 —— 实测把主按钮的 ignoreEventInterval
+  /// 设为 0(等于关掉防抖),三连击主按钮**依然**只记录到一次回调,
+  /// 也就是说那样写出来的用例根本区分不了任何东西。
+  /// DebounceButton 的回调只往 EventLog 记一行,三次点击都能真的送到按钮上。
   func testThreeRapidTapsFireHandlerOnlyOnce() {
-    XCTAssertTrue(mainButton.waitForExistence(timeout: 10))
+    let button = app.buttons["DebounceButton"]
+    XCTAssertTrue(button.waitForExistence(timeout: 10))
 
     // 三连击手势,而不是三次 tap():后者每次都要重新解析元素,很容易超出
     // ignoreEventInterval(默认 1.0s),那时"只触发一次"就不再是防抖的功劳。
     let start = Date()
-    mainButton.tap(withNumberOfTaps: 3, numberOfTouches: 1)
+    button.tap(withNumberOfTaps: 3, numberOfTouches: 1)
     let elapsed = Date().timeIntervalSince(start)
     XCTAssertLessThan(
       elapsed, 1.0,
       "三次点击共用了 \(elapsed)s,已超过 SwiftyButton 默认的 1.0s 忽略窗口 —— "
         + "这一轮不构成对防抖的检验")
 
-    XCTAssertTrue(alert.waitForExistence(timeout: 10))
-
-    // 判据一:回调实际送达的次数。EventLog 里每送达一次点击就多一条 "BtnTaped"。
+    waitUntil(10, "第一次点击的回调送达") {
+      self.occurrences(of: "DebounceTap#1", in: self.eventLog) == 1
+    }
     let log = eventLog
     XCTAssertEqual(
-      occurrences(of: "BtnTaped", in: log), 1,
-      "点击回调送达次数不为 1,防抖没生效。EventLog = \(log)")
+      occurrences(of: "DebounceTap#", in: log), 1,
+      "三次快速点击送达了不止一次回调,防抖没生效。EventLog = \(log)")
 
-    // 判据二:界面上真的只有一个 alert。三次送达会 addSubview 三个 alert 视图。
-    XCTAssertEqual(alertCount, 1, "窗口里挂着 \(alertCount) 个 alert,防抖没生效")
-
-    // 判据三:只关一次就该一个不剩。判据二万一因无障碍树折叠同类视图而失真,
-    // 这一条仍然分得清 1 和 3。
-    app.buttons["First Button"].firstMatch.tap()
-    waitUntil(10, "唯一的 alert 关闭后不再有 alert") { self.alertCount == 0 }
+    // 反面:忽略窗口过去之后,同一个按钮必须还能再触发 —— 否则上面那条
+    // "只有一次"用一个坏掉的按钮也能满足。
+    Thread.sleep(forTimeInterval: 1.2)
+    button.tap()
+    waitUntil(10, "忽略窗口过后再次点击可以送达") {
+      self.occurrences(of: "DebounceTap#2", in: self.eventLog) == 1
+    }
   }
 
   // MARK: - 验收行:Alert 的两个按钮各自执行自己的动作
