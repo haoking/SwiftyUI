@@ -284,20 +284,36 @@ public final class SwiftyAlertView: UIViewController {
   private var keyboardWillShowObserver: (any NSObjectProtocol)?
   private var keyboardWillHideObserver: (any NSObjectProtocol)?
 
-  // 下面两处 MainActor.assumeIsolated **不是**过渡代码,不要当成 2.0 迁移期
-  // 遗留的桥接顺手删掉。它们跨的是一条真实且长期存在的边界:
-  // NotificationCenter 的 block 形式接口收的是 `@Sendable (Notification) -> Void`
-  // ——一个非隔离闭包,类型系统里没有办法声明"它只会在主线程被调用"。
-  // 而 queue: nil 表示在**发送方线程**同步回调,键盘通知恒由 UIKit 在主线程发出,
-  // 所以断言成立;改成 Task 跳回主 actor 会把同步的帧调整变成异步,键盘弹出时
-  // 会看到明显的跳动。assumeIsolated 在假设被违反时会 trap,是受检断言而非掩盖。
-  override public func viewDidAppear(_ animated: Bool) {
-    super.viewDidAppear(animated)
-
-    // 先撤销上一轮的注册再重新注册。viewDidAppear 与 viewDidDisappear 未必严格
-    // 配对(同一个实例被再次展示、或宿主只驱动了 appear),不先撤销就会用新
-    // token 覆盖旧 token,旧观察者从此永远失去被移除的机会 —— 那正是 B21 的
-    // 泄漏形态,只是换了个入口。
+  /// 挂上两个键盘观察者。与 removeKeyboardObservers() 成对,由 showTitle /
+  /// hideView 驱动。
+  ///
+  /// **为什么不是 viewDidAppear / viewDidDisappear**:showTitle 是把自己的 view
+  /// 直接 `addSubview` 到 window 上的(见下方 :562),既不 present、也不做容器
+  /// 包含、更不是 window 的 rootViewController —— UIKit 只在真正的外观转场里
+  /// 调用那两个回调,对本控制器**从来不会**调用。注册代码放在那里等于从不执行:
+  /// 键盘避让自 1.x 起就是死代码,B20(注册错通知)与 B21(撤销是空操作)
+  /// 两个缺陷也因此从未真实发生过。
+  ///
+  /// 本类型本来就自带一套显式的展示生命周期 —— showTitle 里的 selfReference
+  /// 自持有、hideView 完成回调里的清理 —— 观察者跟着这套走才是一致的,也才真的
+  /// 会执行。不改上屏方式(那是另一回事,风险大得多且这里并不需要)。
+  ///
+  /// internal 而非 private:单元测试进程没有任何 window scene
+  /// (`UIApplication.shared.connectedScenes` 为空),`SwiftyGlobal.keyWindow`
+  /// 恒为 nil,showTitle 的成功分支在测试里根本走不到。开放到 internal 以便
+  /// 测试直接驱动这一对方法。对外仍不可见。
+  ///
+  /// 下面两处 MainActor.assumeIsolated **不是**过渡代码,不要当成 2.0 迁移期
+  /// 遗留的桥接顺手删掉。它们跨的是一条真实且长期存在的边界:
+  /// NotificationCenter 的 block 形式接口收的是 `@Sendable (Notification) -> Void`
+  /// ——一个非隔离闭包,类型系统里没有办法声明"它只会在主线程被调用"。
+  /// 而 queue: nil 表示在**发送方线程**同步回调,键盘通知恒由 UIKit 在主线程发出,
+  /// 所以断言成立;改成 Task 跳回主 actor 会把同步的帧调整变成异步,键盘弹出时
+  /// 会看到明显的跳动。assumeIsolated 在假设被违反时会 trap,是受检断言而非掩盖。
+  func addKeyboardObservers() {
+    // 先撤销上一轮的注册再重新注册:同一个实例可能被再次 showTitle,
+    // 不先撤销就会用新 token 覆盖旧 token,旧观察者从此永远失去被移除的机会
+    // —— 那正是 B21 的泄漏形态,只是换了个入口。
     removeKeyboardObservers()
 
     keyboardWillShowObserver = NotificationCenter.default.addObserver(
@@ -360,11 +376,6 @@ public final class SwiftyAlertView: UIViewController {
     }
   }
 
-  public override func viewDidDisappear(_ animated: Bool) {
-    super.viewDidDisappear(animated)
-    removeKeyboardObservers()
-  }
-
   /// 撤销两个键盘观察者。可重复调用:token 撤销后立刻置 nil。
   ///
   /// 之所以必须按 token 撤销而不是 `removeObserver(self, name:)`:见上方
@@ -373,7 +384,7 @@ public final class SwiftyAlertView: UIViewController {
   /// 每展示一次 alert 就多两个,进程生命周期内只增不减,且每次键盘事件都会
   /// 把它们**全部**触发一遍。这与两个 block 内的 MainActor.assumeIsolated 复合
   /// 更糟:后台线程 post 键盘通知会 trap,而 trap 点数量随展示次数单调增长。
-  private func removeKeyboardObservers() {
+  func removeKeyboardObservers() {
     if let observer = keyboardWillShowObserver {
       NotificationCenter.default.removeObserver(observer)
       keyboardWillShowObserver = nil
@@ -555,10 +566,15 @@ public final class SwiftyAlertView: UIViewController {
     // 参照 SwiftyToast 同一形状的守卫(SwiftyToast.swift:80-83):提前返回前先把
     // 自身的残留引用交代干净。
     guard let rv = SwiftyGlobal.keyWindow else {
-      // 无可用窗口时不展示,仍返回 responder 以维持签名
+      // 无可用窗口时不展示,仍返回 responder 以维持签名。
+      // 这条分支不注册键盘观察者(注册在守卫之后),因此不需要配平 ——
+      // 注册与撤销在每一条出口上都成对:走到这里 = 从未注册。
       return SwiftyAlertViewResponder(alertview: self)
     }
     selfReference = self
+    // 展示开始,挂上键盘观察者;由 hideView() 撤销。两者构成本类型显式的
+    // 展示生命周期,详见 addKeyboardObservers() 的说明。
+    addKeyboardObservers()
     rv.addSubview(view)
     view.frame = rv.bounds
     baseView.frame = rv.bounds
@@ -713,6 +729,12 @@ public final class SwiftyAlertView: UIViewController {
   // Close SwiftyAlertView
   @objc
   public func hideView() {
+    // 与 showTitle 的 addKeyboardObservers() 配对。放在动画**之前**而不是完成
+    // 回调里:一旦决定收起,就不该再让键盘通知挪动这个 alert;而且即便动画的
+    // 完成回调因故没跑到,撤销也已经发生 —— 注册与撤销必须在每条路径上成对。
+    // 可重复调用,重复 hideView() 是安全的。
+    removeKeyboardObservers()
+
     UIView.animate(
       withDuration: 0.2,
       animations: {
