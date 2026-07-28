@@ -1,5 +1,5 @@
 //
-//  SwiftyAlert.swift
+//  SwiftyAlertView.swift
 //  WHCWSIFT
 //
 //  Created by Haochen Wang on 10/30/17.
@@ -93,7 +93,14 @@ public final class SwiftyAlertView: UIViewController {
 
   fileprivate func setup() {
     // Set up main view
-    view.frame = UIScreen.main.bounds
+    // 与本文件其余取屏位置(viewWillLayoutSubviews / showTitle / showAnimation /
+    // isShowing)保持一致,从 key window 取尺寸而不是 UIScreen.main:
+    // UIScreen.main 自 iOS 16 起废弃,且在多窗口 / 分屏 / Stage Manager 下返回的是
+    // 整块物理屏幕,而不是本 alert 真正所在的那个窗口 —— 与已修的 B17、B1 同一缺陷类。
+    // 今天不报废弃告警只是因为部署目标是 iOS 15(低于废弃版本),抬高目标即会暴露。
+    // 无窗口时取 .zero:这里只是初始值,真正的布局在 viewWillLayoutSubviews 里
+    // 按当时的 key window 重算。
+    view.frame = SwiftyGlobal.keyWindow?.bounds ?? .zero
     view.autoresizingMask = [
       UIView.AutoresizingMask.flexibleHeight, UIView.AutoresizingMask.flexibleWidth,
     ]
@@ -269,6 +276,14 @@ public final class SwiftyAlertView: UIViewController {
   var tmpCircleViewFrameOrigin: CGPoint?
   var keyboardHasBeenShown: Bool = false
 
+  // NotificationCenter 的 block 形式注册,观察者是 addObserver 返回的 token,
+  // self 从未被注册 —— removeObserver(self, name:) 对它们是彻头彻尾的空操作(B21)。
+  // 必须把 token 存下来,再逐个 removeObserver(token)。写法照抄
+  // SwiftyThreadPool.memoryWarningObserver(SwiftyThreadPool.swift:44/57/167)
+  // 与 ImageCachePool.memoryWarningObserver,全库保持同一形状。
+  private var keyboardWillShowObserver: (any NSObjectProtocol)?
+  private var keyboardWillHideObserver: (any NSObjectProtocol)?
+
   // 下面两处 MainActor.assumeIsolated **不是**过渡代码,不要当成 2.0 迁移期
   // 遗留的桥接顺手删掉。它们跨的是一条真实且长期存在的边界:
   // NotificationCenter 的 block 形式接口收的是 `@Sendable (Notification) -> Void`
@@ -279,7 +294,13 @@ public final class SwiftyAlertView: UIViewController {
   override public func viewDidAppear(_ animated: Bool) {
     super.viewDidAppear(animated)
 
-    NotificationCenter.default.addObserver(
+    // 先撤销上一轮的注册再重新注册。viewDidAppear 与 viewDidDisappear 未必严格
+    // 配对(同一个实例被再次展示、或宿主只驱动了 appear),不先撤销就会用新
+    // token 覆盖旧 token,旧观察者从此永远失去被移除的机会 —— 那正是 B21 的
+    // 泄漏形态,只是换了个入口。
+    removeKeyboardObservers()
+
+    keyboardWillShowObserver = NotificationCenter.default.addObserver(
       forName: UIResponder.keyboardWillShowNotification, object: nil, queue: nil
     ) { [weak self] (notification) in
       // Notification 不是 Sendable,不能整个送进 assumeIsolated;
@@ -313,11 +334,13 @@ public final class SwiftyAlertView: UIViewController {
       }
     }
 
-    // FIXME(B20): 这里注册的是 keyboardWillShowNotification,但下方 block 的
-    // 逻辑(检查 keyboardHasBeenShown、恢复原 frame)是为 keyboardWillHide 写的。
-    // 属先前就存在的缺陷,Task 17 的纯语言模式迁移刻意未修以免夹带行为变更。
-    NotificationCenter.default.addObserver(
-      forName: UIResponder.keyboardWillShowNotification, object: nil, queue: nil
+    // 键盘收起:把上面那个观察者保存下来的原始 origin 还原回去。
+    // 2.0 之前这里错注册在 keyboardWillShowNotification 上,与上面那个观察者
+    // **同注册在一个通知**上:按注册顺序,上面刚把 alert 上移,这里紧接着就在
+    // 同一次派发里把 origin 还原并清空,每次键盘弹出的净效果恒为零 —— 也就是说
+    // 键盘避让功能整体失效,而 addTextField() 存在的意义正是配合键盘(B20)。
+    keyboardWillHideObserver = NotificationCenter.default.addObserver(
+      forName: UIResponder.keyboardWillHideNotification, object: nil, queue: nil
     ) { [weak self] (_) in
       MainActor.assumeIsolated {
         guard let strongSelf = self else { return }
@@ -339,14 +362,26 @@ public final class SwiftyAlertView: UIViewController {
 
   public override func viewDidDisappear(_ animated: Bool) {
     super.viewDidDisappear(animated)
-    // FIXME(B21): removeObserver(self, name:) 对以 block 形式注册的观察者是空操作
-    // ——观察者由 addObserver 返回的 token 代表,self 从未被注册。
-    // 故两个键盘观察者在 viewDidDisappear 后仍然存活并持续触发。
-    // 属先前就存在的缺陷,Task 17 刻意未修,见 B20。
-    NotificationCenter.default.removeObserver(
-      self, name: UIResponder.keyboardWillShowNotification, object: nil)
-    NotificationCenter.default.removeObserver(
-      self, name: UIResponder.keyboardWillHideNotification, object: nil)
+    removeKeyboardObservers()
+  }
+
+  /// 撤销两个键盘观察者。可重复调用:token 撤销后立刻置 nil。
+  ///
+  /// 之所以必须按 token 撤销而不是 `removeObserver(self, name:)`:见上方
+  /// keyboardWillShowObserver 的说明(B21)。观察者只持 `[weak self]`,所以
+  /// 控制器本身能正常释放 —— 泄漏的是 NotificationCenter 里的注册项本身:
+  /// 每展示一次 alert 就多两个,进程生命周期内只增不减,且每次键盘事件都会
+  /// 把它们**全部**触发一遍。这与两个 block 内的 MainActor.assumeIsolated 复合
+  /// 更糟:后台线程 post 键盘通知会 trap,而 trap 点数量随展示次数单调增长。
+  private func removeKeyboardObservers() {
+    if let observer = keyboardWillShowObserver {
+      NotificationCenter.default.removeObserver(observer)
+      keyboardWillShowObserver = nil
+    }
+    if let observer = keyboardWillHideObserver {
+      NotificationCenter.default.removeObserver(observer)
+      keyboardWillHideObserver = nil
+    }
   }
 
   override public func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -509,14 +544,21 @@ public final class SwiftyAlertView: UIViewController {
     _ title: String, subTitle: String, style: SwiftyAlertViewStyle, colorStyle: UInt? = 0x000000,
     colorTextButton: UInt? = 0xFFFFFF, circleIconImage: UIImage? = nil
   ) -> SwiftyAlertViewResponder {
-    selfReference = self
     view.alpha = 0
     view.tag = uniqueTag
     view.accessibilityIdentifier = uniqueAccessibilityIdentifier
+    // keyWindow 守卫必须排在 selfReference = self **之前**。
+    // selfReference 是展示期间的自持有(调用方不留引用,alert 也能活到 hideView()),
+    // 而它只在 hideView() 的 completion 里被清空 —— 提前 return 的分支永远到不了那里。
+    // 1.x 这条路径是 `UIApplication.shared.keyWindow!` 的无条件崩溃,泄漏因此不可能
+    // 存在;加固 B1 时若照搬原来的语句顺序,等于把崩溃换成了永久泄漏。
+    // 参照 SwiftyToast 同一形状的守卫(SwiftyToast.swift:80-83):提前返回前先把
+    // 自身的残留引用交代干净。
     guard let rv = SwiftyGlobal.keyWindow else {
       // 无可用窗口时不展示,仍返回 responder 以维持签名
       return SwiftyAlertViewResponder(alertview: self)
     }
+    selfReference = self
     rv.addSubview(view)
     view.frame = rv.bounds
     baseView.frame = rv.bounds
