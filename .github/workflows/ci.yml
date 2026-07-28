@@ -56,7 +56,22 @@ jobs:
           best_version="0"
           for app in /Applications/Xcode*.app; do
             [ -d "$app" ] || continue
-            ver="$("$app/Contents/Developer/usr/bin/xcodebuild" -version 2>/dev/null | awk '/^Xcode/{print $2; exit}')"
+            # 先把 xcodebuild 的输出**完整**取回来,再在 bash 里解析,不走管道。
+            # 曾经这里写作 `xcodebuild -version | awk '/^Xcode/{print $2; exit}'`:
+            # awk 匹配到第一行就 exit 关闭管道,而 xcodebuild 还在写第二行
+            # (Build version …),于是被信号打断;pipefail 把它传上来,set -e 让
+            # 整步以 134 阵亡。这是竞态 —— 输出小到通常一次 write 就写完,本地几乎
+            # 必然复现不出,runner 负载高时才踩到。上一步的探测有 `|| echo` 兜底,
+            # 所以日志里 15 个 Xcode 全部正常,唯独这一步崩,排查方向很容易被带偏。
+            # 单个 Xcode 探测失败不该让整步失败,故加 `|| true`:真正"一个都没有"
+            # 的情况由下面的 best_path 为空来兜。
+            raw="$("$app/Contents/Developer/usr/bin/xcodebuild" -version 2>/dev/null || true)"
+            ver=""
+            while IFS= read -r line; do
+              case "$line" in
+                "Xcode "*) ver="${line#Xcode }"; break ;;
+              esac
+            done <<< "$raw"
             [ -n "$ver" ] || continue
             newer="$(printf '%s\n%s\n' "$ver" "$best_version" | sort -V | tail -1)"
             if [ "$newer" = "$ver" ]; then
@@ -153,7 +168,22 @@ jobs:
           best_version="0"
           for app in /Applications/Xcode*.app; do
             [ -d "$app" ] || continue
-            ver="$("$app/Contents/Developer/usr/bin/xcodebuild" -version 2>/dev/null | awk '/^Xcode/{print $2; exit}')"
+            # 先把 xcodebuild 的输出**完整**取回来,再在 bash 里解析,不走管道。
+            # 曾经这里写作 `xcodebuild -version | awk '/^Xcode/{print $2; exit}'`:
+            # awk 匹配到第一行就 exit 关闭管道,而 xcodebuild 还在写第二行
+            # (Build version …),于是被信号打断;pipefail 把它传上来,set -e 让
+            # 整步以 134 阵亡。这是竞态 —— 输出小到通常一次 write 就写完,本地几乎
+            # 必然复现不出,runner 负载高时才踩到。上一步的探测有 `|| echo` 兜底,
+            # 所以日志里 15 个 Xcode 全部正常,唯独这一步崩,排查方向很容易被带偏。
+            # 单个 Xcode 探测失败不该让整步失败,故加 `|| true`:真正"一个都没有"
+            # 的情况由下面的 best_path 为空来兜。
+            raw="$("$app/Contents/Developer/usr/bin/xcodebuild" -version 2>/dev/null || true)"
+            ver=""
+            while IFS= read -r line; do
+              case "$line" in
+                "Xcode "*) ver="${line#Xcode }"; break ;;
+              esac
+            done <<< "$raw"
             [ -n "$ver" ] || continue
             newer="$(printf '%s\n%s\n' "$ver" "$best_version" | sort -V | tail -1)"
             if [ "$newer" = "$ver" ]; then
