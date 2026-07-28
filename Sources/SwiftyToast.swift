@@ -10,12 +10,23 @@ import UIKit
 
 @MainActor
 public final class SwiftyToast {
+  /// Toast 视图的 accessibilityIdentifier。
+  ///
+  /// 与 SwiftyAlertView 给自己的根视图设 `"SwiftyAlert"` 是同一件事、同一个用途:
+  /// 让这个直接挂在 window 上、不属于任何 view controller 的视图可以被外部识别。
+  public static let accessibilityIdentifier: String = "SwiftyToast"
+
   private lazy var toastLabel: SwiftyLabel = { [unowned self] in
     var toastLabel = SwiftyLabel(nil, .white, .init(white: 0.0, alpha: 0.7))
     toastLabel.layer.cornerRadius = 5
     toastLabel.clipsToBounds = true
     toastLabel.padding = 5.0
     toastLabel.font = .systemFont(ofSize: 12)
+    // SwiftyLabel 是 UIView 子类、文本由 TextKit 自绘,不像 UILabel 那样自带
+    // 无障碍暴露 —— 不设这几项,toast 对 VoiceOver 完全是一块沉默的色块。
+    toastLabel.isAccessibilityElement = true
+    toastLabel.accessibilityTraits = .staticText
+    toastLabel.accessibilityIdentifier = Self.accessibilityIdentifier
     return toastLabel
   }()
 
@@ -39,6 +50,7 @@ public final class SwiftyToast {
 
   private func layoutView(text: String) {
     toastLabel.text = text
+    toastLabel.accessibilityLabel = text
 
     let window = SwiftyGlobal.keyWindow
     let containerSize: CGSize = window?.bounds.size ?? .zero
@@ -47,24 +59,19 @@ public final class SwiftyToast {
       width: containerSize.width * (280.0 / 320.0), height: CGFloat.greatestFiniteMagnitude)
     let fitSize: CGSize = toastLabel.sizeThatFits(constraintSize)
 
-    var x: CGFloat
-    var y: CGFloat
-    var width: CGFloat
-    var height: CGFloat
-
-    if isPortrait {
-      width = containerSize.width
-      height = containerSize.height
-      y = 30.0
-    } else {
-      width = containerSize.height
-      height = containerSize.width
-      y = 20.0
-    }
-
+    // B22:横屏下原本把 containerSize 的宽高**对调**再用
+    // (width = containerSize.height、height = containerSize.width)。
+    // 那是 iOS 7 及更早的写法——那时 window 不跟着界面旋转,bounds 恒为竖屏尺寸,
+    // 所以横屏要手工换算。iOS 8 起 window.bounds 本身就是旋转后的尺寸,再对调一次
+    // 等于把结果转回竖屏坐标:实测 402×874 的设备转到横屏(窗口 874×402)后,
+    // toast 被放到 (132.5, 827) —— y 比窗口高度还大 400 多点,整块**在屏幕外**,
+    // 用户什么也看不到。与 B17(缓存屏幕尺寸)、SwiftyAlertView 弃用 UIScreen.main
+    // 属于同一类缺陷:对"屏幕/窗口几何"做了一个早已不成立的静态假设。
+    // 现在直接用 containerSize,只保留两种朝向下不同的底部留白。
+    let bottomMargin: CGFloat = isPortrait ? 30.0 : 20.0
     let size: CGSize = .init(width: fitSize.width + 10 + 10, height: fitSize.height + 6 + 6)
-    x = (width - size.width) * 0.5
-    y = height - (size.height + y)
+    let x: CGFloat = (containerSize.width - size.width) * 0.5
+    let y: CGFloat = containerSize.height - (size.height + bottomMargin)
     toastLabel.frame = CGRect(x: x, y: y, width: size.width, height: size.height)
   }
 
