@@ -287,16 +287,23 @@ public final class SwiftyAlertView: UIViewController {
   /// 挂上两个键盘观察者。与 removeKeyboardObservers() 成对,由 showTitle /
   /// hideView 驱动。
   ///
-  /// **为什么不是 viewDidAppear / viewDidDisappear**:showTitle 是把自己的 view
-  /// 直接 `addSubview` 到 window 上的(见下方 :562),既不 present、也不做容器
-  /// 包含、更不是 window 的 rootViewController —— UIKit 只在真正的外观转场里
-  /// 调用那两个回调,对本控制器**从来不会**调用。注册代码放在那里等于从不执行:
-  /// 键盘避让自 1.x 起就是死代码,B20(注册错通知)与 B21(撤销是空操作)
-  /// 两个缺陷也因此从未真实发生过。
+  /// **为什么不是 viewDidAppear / viewDidDisappear**:不是因为它们不触发 ——
+  /// 实测(iOS 26.5 模拟器)它们**会**触发:把注册搬回 viewDidAppear,
+  /// `testAlertWithTextFieldAvoidsKeyboard` 照样通过。这一点值得写下来,因为
+  /// 按经典 UIKit 规则,一个既不 present、也不做容器包含、更不是 window
+  /// rootViewController 的控制器(showTitle 只是把 view 裸 `addSubview` 到
+  /// window 上,见下方)不该收到外观回调 —— 规则如此,实际行为并非如此。
   ///
-  /// 本类型本来就自带一套显式的展示生命周期 —— showTitle 里的 selfReference
-  /// 自持有、hideView 完成回调里的清理 —— 观察者跟着这套走才是一致的,也才真的
-  /// 会执行。不改上屏方式(那是另一回事,风险大得多且这里并不需要)。
+  /// 换站点的真正理由是**不去依赖这个没有契约保证的行为**,外加两条硬收益:
+  ///
+  /// 1. 与本类型自带的那套显式展示生命周期(showTitle 里的 selfReference 自持有、
+  ///    hideView 里的清理)确定性配对。无 key window 的提前返回发生在注册之前,
+  ///    因此"注册与撤销在每条出口上成对"这条不变量在所有路径上都成立。
+  /// 2. hideView() 在动画**之前**撤销:一旦决定收起,迟到的键盘通知就不该再挪动
+  ///    这个正在消失的 alert。挂在 viewDidDisappear 上做不到这件事 —— 那时动画
+  ///    早就跑完了。
+  ///
+  /// 不改上屏方式(那是另一回事,风险大得多且这里并不需要)。
   ///
   /// internal 而非 private:单元测试进程没有任何 window scene
   /// (`UIApplication.shared.connectedScenes` 为空),`SwiftyGlobal.keyWindow`
