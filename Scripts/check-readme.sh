@@ -154,6 +154,7 @@ AnyObject
 Date
 MainActor
 NSObject
+Operation
 OperationQueue
 Sendable
 Task

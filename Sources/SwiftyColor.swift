@@ -123,7 +123,9 @@ extension UIImage {
   ///
   /// - Important: 取色链条出错或被取消时(例如 SwiftyThreadPool 收到内存
   ///   告警调用 removeAll()),`complete` **不会被调用**,且没有任何信号。
-  ///   需要确定性回调的调用方请改用 `colors() async throws`。
+  ///   需要把失败与取消变成可见信号的调用方请改用 `colors() async throws`
+  ///   —— 但它换来的只是"错误被抛出来"这一件事,不是"一定会有结果":
+  ///   它继承了 `value()` 的全部三种挂死情形(见那里的文档注释)。
   public final func colors(
     _ complete: (
       @MainActor @Sendable (
@@ -153,8 +155,9 @@ extension UIImage {
   /// 在后台线程分析图片主色,以 async/await 取回。
   ///
   /// 与回调版 `colors(_:)` 的区别只在错误处理:回调版以无参 `.catch()` 收尾,
-  /// 链条出错或被取消时回调**不会被调用**,调用方拿不到任何信号,转圈的 UI
-  /// 会一直转;本方法则把错误抛出来。
+  /// 链条出错或被取消时回调**不会被调用**,调用方拿不到任何信号;本方法则把
+  /// 错误抛出来。仅此一条区别 —— 尤其不包括"一定会返回",见下方第一条
+  /// Important。
   ///
   /// ```swift
   /// do {
@@ -165,8 +168,15 @@ extension UIImage {
   /// }
   /// ```
   ///
-  /// - Throws: `PromiseError.cancelled` —— 取色链条被取消(最常见的来源是
-  ///   SwiftyThreadPool 收到内存告警调用 removeAll())。
+  /// - Important: 本方法**不是**回调版的"不会挂死版本"。它就是 `value()` 加一个
+  ///   nil 检查,因此**继承了 `value()` 的全部三种挂死情形**(线程池被 stop()
+  ///   后未 restart()、被 cancel() 过、或在挂起状态下被 removeAll()/cancel()
+  ///   —— 见 `Promise.value()` 的文档注释,其中第三种在日常使用中够得着)。
+  ///   取色链条走的是 `SwiftyThreadPool.default`,上述任一情形发生时这个
+  ///   await 同样一直不返回。它相对回调版的收益只有一条:失败与取消从"静默"
+  ///   变成"抛错"。需要"菊花一定会停"的调用方,请自己在外面加一层超时。
+  /// - Throws: `PromiseError.cancelled` —— 取色链条**的任务**被取消(最常见的
+  ///   来源是 SwiftyThreadPool 收到内存告警调用 removeAll())。
   /// - Throws: `PromiseError.noValue` —— 链条终结但没有产出值。正常情况下
   ///   不会发生;它对应 self 在分析开始前就被释放这一理论情形。
   public final func colors() async throws -> (
