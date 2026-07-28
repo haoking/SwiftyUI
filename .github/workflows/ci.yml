@@ -33,7 +33,7 @@ jobs:
     # 20 分钟对上述总和有数倍余量,同时远低于 GitHub 6 小时的默认上限。
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: 列出 runner 上可用的 Xcode
         # 不管后面选择 Xcode 是否成功,先把实情打进日志,方便和假设不符时排查。
@@ -148,7 +148,7 @@ jobs:
     # 给同样有数倍余量的上限。
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: 列出 runner 上可用的 Xcode
         run: |
