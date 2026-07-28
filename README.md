@@ -1,14 +1,14 @@
 # SwiftyUI [![Awesome](https://cdn.rawgit.com/sindresorhus/awesome/d7305f38d29fed78fa85652e3a63e154dd8e8829/media/badge.svg)](https://github.com/sindresorhus/awesome)
 
-![Build Status](https://github.com/haoking/SwiftyUI/actions/workflows/ci.yml/badge.svg?branch=master) ![CocoaPods Compatible](https://img.shields.io/cocoapods/v/SwiftyUI.svg) ![Platform](https://img.shields.io/cocoapods/p/SwiftyUI.svg?style=flat) ![Swift 4.0+](https://img.shields.io/badge/Swift-4.0%2B-orange.svg)
+![Build Status](https://github.com/haoking/SwiftyUI/actions/workflows/ci.yml/badge.svg?branch=master) ![CocoaPods Compatible](https://img.shields.io/cocoapods/v/SwiftyUI.svg) ![Platform](https://img.shields.io/cocoapods/p/SwiftyUI.svg?style=flat) ![Swift 6.0](https://img.shields.io/badge/Swift-6.0-orange.svg)
 
-High performance and lightweight UIView,  UIImage, UIImageView, UIlabel, UIButton and more.
+High performance and lightweight UIView, UIImage, UIImageView, UIlabel, UIButton and more.
 
 ## Features
 
 - [x] SwiftyView GPU rendering Image and Color
 - [x] SwiftyColor — color from Hex, colorRGBA value from UIColor, colors from Image
-- [x] UIImage Extensions for Inflation / Scaling / Rounding 
+- [x] UIImage Extensions for Inflation / Scaling / Rounding
 - [x] Auto-Purging In-Memory Image Cache
 - [x] SwiftyImageView extension 10+ animations
 - [x] SwiftyImageView 150% High performance more than UIImageView, depending on UIView-package, Image-GPU and Image-Cache
@@ -17,7 +17,7 @@ High performance and lightweight UIView,  UIImage, UIImageView, UIlabel, UIButto
 - [x] SwiftyToast is depend on globalCenter and show the toast without overlap.
 - [x] SwiftyAlert contains SuccessAlert, ErrorAlert, WarningAlert, InfoAlert, EditAlert and their special styles.
 - [x] lightweight, almost one class for each UI
-- [x] UI loading thread-safe
+- [x] UI mutations are confined to the main thread at compile time, enforced via `@MainActor`
 - [x] Block-Package to more easy to use
 - [x] Easy and simple to use, all APIs are same to system APIs
 - [x] SwiftyThreadPool auto manage threads depends on active CPUs, and autorelease Runloop inside
@@ -25,9 +25,9 @@ High performance and lightweight UIView,  UIImage, UIImageView, UIlabel, UIButto
 
 ## Requirements
 
-- iOS 9.0+
-- Xcode 9.0+ (Swift Package Manager requires Xcode 11.0+)
-- Swift 4.2+
+- iOS 15.0+
+- Xcode 16.0+
+- Swift 6.0
 
 ## Communication
 
@@ -41,7 +41,7 @@ High performance and lightweight UIView,  UIImage, UIImageView, UIlabel, UIButto
 
 [Swift Package Manager](https://swift.org/package-manager/) is a tool for managing the distribution of Swift code. It’s integrated with the Swift build system to automate the process of downloading, compiling, and linking dependencies.
 
-> Xcode 11.0+ is required.
+> Xcode 16.0+ is required.
 
 To integrate SwiftyUI into your Xcode project using Swift Package Manager
 
@@ -55,7 +55,7 @@ Or, add it to the dependencies value of your `Package.swift`:
 
 ```ruby
 dependencies: [
-    .package(url: "https://github.com/haoking/SwiftyUI.git", .upToNextMajor(from: "1.0.0"))
+    .package(url: "https://github.com/haoking/SwiftyUI.git", .upToNextMajor(from: "2.0.0"))
 ]
 ```
 
@@ -73,7 +73,7 @@ To integrate SwiftyUI into your Xcode project using CocoaPods, specify it in you
 
 ```ruby
 source 'https://github.com/CocoaPods/Specs.git'
-platform :ios, '8.0'
+platform :ios, '15.0'
 use_frameworks!
 
 target '<Your Target Name>' do
@@ -87,7 +87,33 @@ Then, run the following command:
 $ pod install
 ```
 
-------
+---
+
+## Migration from 1.x
+
+2.0.0 is a breaking upgrade: minimum deployment target is now iOS 15.0, and the library is built in Swift 6 language mode. Full bug-fix and "Added" history is in [CHANGELOG.md](CHANGELOG.md); this table is just the breaking changes.
+
+| Change                                                                                                                                                                           | Migration                                                                                                                                                                                                                                                                           |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ImageCachePool.defalut` → `.default`                                                                                                                                            | The compiler fix-it renames call sites automatically; the old (misspelled) name is kept as a deprecated alias for one major version                                                                                                                                                 |
+| `SwiftyThreadPool.defalut` → `.default`                                                                                                                                          | Same as above                                                                                                                                                                                                                                                                       |
+| `SwiftyGlobal.keyWindow` is now `UIWindow?`                                                                                                                                      | Callers must handle the optional                                                                                                                                                                                                                                                    |
+| `SwiftyGlobal.navHeight` / `barHeight` removed                                                                                                                                   | Use `SwiftyGlobal.safeAreaInsets` instead                                                                                                                                                                                                                                           |
+| `SwiftyLabel.textColor` is now non-optional `UIColor`                                                                                                                            | Remove any unwrapping                                                                                                                                                                                                                                                               |
+| `UIImage.colors(_:)` dominant-color sort direction changed                                                                                                                       | The internal sort was ascending, so `.first` picked the _least_-frequent edge color; it's now descending and picks the most-frequent one. Background/primary/secondary/detail output for real images can change                                                                     |
+| All UI types (`SwiftyView`, `SwiftyLabel`, `SwiftyButton`, `SwiftyImageView`, `SwiftyToast`, `SwiftyAlertView`, `SwiftyGlobal`, …) are now `@MainActor`-isolated                 | Code that reads or writes their properties must run on the main thread; this is enforced at compile time                                                                                                                                                                            |
+| `Promise<T>` now requires `T: Sendable`; the closures passed to `firstly`/`then`/`always`/`catch` must be `@Sendable`; `UIImage.colors(_:)`'s callback is `@MainActor @Sendable` | Mostly visible to Swift 6-mode callers doing strict concurrency checking. Make captured state `Sendable`, or adjust closures accordingly                                                                                                                                            |
+| The global `isOpaque` optimization is off by default                                                                                                                             | Call `SwiftyUI.enableGlobalOpaqueOptimization()` explicitly if you relied on it                                                                                                                                                                                                     |
+| `TextEditable` / `ImageCacheable` no longer ship a default, associated-object-backed implementation                                                                              | Custom conformers must supply their own storage                                                                                                                                                                                                                                     |
+| `ImageSettable` now declares a storage requirement (`var backgroundImage: UIImage? { get set }`)                                                                                 | Conformers must provide a real `backgroundImage` stored property                                                                                                                                                                                                                    |
+| `NSObject.swizzleInstance` is now internal; `NSObject.swizzleStatic` has been removed entirely                                                                                   | No replacement — both were implementation details                                                                                                                                                                                                                                   |
+| `ImageCachePool.add(_:withIdentifier:)` is now synchronous                                                                                                                       | Remove any code that waited/polled for the write to land                                                                                                                                                                                                                            |
+| The swizzle of `UIControl.sendAction` has been removed                                                                                                                           | Tap debounce is now `SwiftyButton.ignoreEventInterval` (default `1.0`)                                                                                                                                                                                                              |
+| `SwiftyGlobal.modelName` no longer maps known device identifiers to friendly names                                                                                               | It now always returns the raw `uname` identifier for physical devices (e.g. `"iPhone12,1"` instead of `"iPhone 11"`)                                                                                                                                                                |
+| Third-party code posting `UIResponder.keyboardWillShowNotification` / `keyboardWillHideNotification` from a background thread                                                    | `SwiftyAlertView`'s keyboard observers now assert main-thread delivery and will trap if violated, instead of racing. Post keyboard notifications from the main thread                                                                                                               |
+| Consumers still building in Swift 5 language mode lose two runtime guards that used to exist                                                                                     | `SwiftyToast.init`'s main-thread `precondition` is gone (the guarantee is now compile-time-only via `@MainActor`, binding Swift 6 callers only); `SwiftyLabel`'s setters no longer skip UIKit calls off the main thread — they now make them off-main instead of silently no-op'ing |
+
+---
 
 ## Usage
 
@@ -179,7 +205,7 @@ let circularImage = myImage.roundedIntoCircle()
 The `ImageCachePool` in SwiftyUI fills the role of that additional caching layer. It is an in-memory image cache used to store images up to a given memory capacity. When the memory capacity is reached, the image cache is sorted by last access date, then the oldest image is continuously purged until the preferred memory usage after purge is met. Each time an image is accessed through the cache, the internal access date of the image is updated.
 
 ```swift
-let imageCachePool : ImageCachePool = .defalut
+let imageCachePool : ImageCachePool = .default
 ```
 
 #### Add / Remove / Fetch Images
@@ -187,7 +213,7 @@ let imageCachePool : ImageCachePool = .defalut
 Interacting with the `ImageCache` protocol APIs is very straightforward.
 
 ```swift
-let imageCachePool : ImageCachePool = .defalut
+let imageCachePool : ImageCachePool = .default
 let myImage : UIImage? = UIImage.load("aImage")
 
 imageCachePool.add(myImage, withIdentifier: "myImage")
@@ -260,10 +286,10 @@ Timer.after(5.0, ClosureWrapper({ (timer) in
 
 ### SwiftyToast
 
-SwiftyToas  is depend on global runloop cente, also show the toast without overlap.
+SwiftyToas is depend on global runloop cente, also show the toast without overlap.
 
 ```swift
-SwiftyToast.load("This is a Toast")
+SwiftyToast("This is a Toast")
 ```
 
 ### SwiftyAlert
@@ -302,7 +328,7 @@ let myOperation : BlockOperation = .init {
     }
 }
 
-ThreadPool.defalut.add(myOperation)
+ThreadPool.default.add(myOperation)
 ```
 
 ### SwiftyPromise
@@ -355,7 +381,31 @@ Promise<String>.firstly(on: .background) { (update, _) in
     }.catch()
 ```
 
-------
+A chain does nothing until it is explicitly terminated — `.catch()` above is one terminator. If you don't need an error handler, `start()` is a lighter-weight terminator that does the same job:
+
+```swift
+Promise<Void>.firstly(with: nil, on: .background) {
+
+    print("task1----Thread:\(Thread.current)")
+
+}.start()
+```
+
+`value()` is an `async`/`await` bridge: it's another terminator, used in place of `catch()`/`start()` when you want to consume the chain's result with `await` instead of a callback. It suspends until the chain finishes and returns its final value, or throws if the chain errored. If a value was never produced (for example a `Promise<Void>` chain, or one that never called `update(...)`), it returns `nil` rather than throwing.
+
+```swift
+func run() async throws {
+    let result = try await Promise<String>.firstly(on: .background) { (update, _) in
+        update("abc")
+    }.then { (update, str) in
+        update((str ?? "") + "!")
+    }.value()
+
+    print(result ?? "nil") // "abc!"
+}
+```
+
+---
 
 ## To Do List
 

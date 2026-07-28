@@ -16,7 +16,7 @@ Pod::Spec.new do |s|
   #
 
   s.name         = "SwiftyUI"
-  s.version      = "1.8.0"
+  s.version      = "2.0.0"
   s.summary      = "High performance and lightweight UI."
 
   # This description is used to generate tags and improve search results.
@@ -68,10 +68,14 @@ Pod::Spec.new do |s|
   # s.platform     = :ios, "5.0"
 
   #  When using multiple platforms
-  s.ios.deployment_target = "9.0"
+  s.ios.deployment_target = "15.0"
   # s.osx.deployment_target = "10.7"
   # s.watchos.deployment_target = "2.0"
   # s.tvos.deployment_target = "9.0"
+
+  #  2.0.0 is the first Swift 6 language mode release; the source relies on
+  #  @MainActor isolation and structured concurrency introduced in Swift 6.
+  s.swift_version = "6.0"
 
 
   # ――― Source Location ―――――――――――――――――――――――――――――――――――――――――――――――――――――――――― #
