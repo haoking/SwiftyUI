@@ -69,15 +69,42 @@ final class SwiftyThreadPoolTests: XCTestCase {
     XCTAssertFalse(pool.remove(withIdentifier: "no-such-operation"))
   }
 
-  // MARK: - B9 / B10 回归
+  // MARK: - 生命周期
 
-  /// B9:常驻 RunLoop 的 environment operation 必须在 init 时真正入队。
-  func testEnvironmentOperationIsEnqueued() {
-    XCTAssertNotNil(
-      pool.operation(withIdentifier: "me.haoking.environmentOperation"),
-      "常驻 RunLoop operation 应在 init 时入队(B9)"
-    )
+  /// 线程池实例必须能被释放。
+  ///
+  /// 曾经不能:init 里投递的常驻 RunLoop operation(`prepareEnvironment()`)
+  /// 在闭包里**强引用 self**,而它的循环条件 `while !Thread.current.isCancelled`
+  /// 永远不会成立 —— `op.cancel()` 置的是 *operation* 的标志位,不是线程的。
+  /// 于是那个 operation 永不结束,对 self 的强引用永不解除,SwiftyThreadPool
+  /// 因此**永远不会 deinit**;连带着 deinit 里那句针对 B18 的
+  /// `removeObserver(memoryWarningObserver)` 也永远执行不到。
+  ///
+  /// 该 operation 已在本轮删除(它的 CFRunLoopSource 的 perform 回调是 nil,
+  /// 被唤醒也什么都不做,且全仓库没有任何消费者;1.x 里它因为 B9 的赋值顺序
+  /// 问题压根没入过队,删掉正好恢复 1.x 的可观察行为)。
+  ///
+  /// 判别力:把 prepareEnvironment() 与 init 里那次 add 加回去,本测试变红。
+  func testPoolDeallocatesAfterCancel() {
+    weak var weakPool: SwiftyThreadPool?
+
+    autoreleasepool {
+      let local = SwiftyThreadPool()
+      weakPool = local
+      local.cancel()
+    }
+
+    // operation 由队列异步释放,轮询等待而不是立即断言
+    let deadline = Date().addingTimeInterval(5.0)
+    while weakPool != nil && Date() < deadline {
+      RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+    }
+    XCTAssertNil(
+      weakPool,
+      "SwiftyThreadPool 必须能被释放 —— 否则 deinit 里针对 B18 的观察者撤销永远执行不到")
   }
+
+  // MARK: - B10 回归
 
   /// B10:stop() 必须真的挂起队列。
   func testStopSuspendsQueue() {

@@ -48,11 +48,12 @@ public final class SwiftyThreadPool: @unchecked Sendable {
   init() {
     let queue: OperationQueue = OperationQueue()
     queue.maxConcurrentOperationCount = MAX_THREAD_COUNT
-    // 必须先赋值再 add:add 内部通过 currentQueue 读取 queue,
-    // 在赋值之前调用会导致 environment operation 被静默丢弃(B9)。
+    // 必须先赋值再做任何投递:add 内部通过 currentQueue 读取 queue,在赋值
+    // 之前调用会被静默丢弃 —— 1.x 就是这样把常驻 RunLoop operation 丢掉的(B9)。
+    // 那个 operation 已在 2.0 删除(理由见下方 deinit 的说明),但这条赋值顺序
+    // 的约束依然成立:init 里今后若再要投递任何 operation,必须排在这一行之后。
     // 此处直接写 self.queue、不经过 lock:实例尚未逃逸到其他线程,是安全的。
     self.queue = queue
-    add(prepareEnvironment(), withIdentifier: "me.haoking.environmentOperation")
 
     memoryWarningObserver = NotificationCenter.default.addObserver(
       forName: UIApplication.didReceiveMemoryWarningNotification,
@@ -61,25 +62,6 @@ public final class SwiftyThreadPool: @unchecked Sendable {
     ) { [weak self] _ in
       self?.removeAll()
     }
-  }
-
-  private func prepareEnvironment() -> BlockOperation {
-    let environmentOperation: BlockOperation = BlockOperation.init {
-
-      var context: CFRunLoopSourceContext = CFRunLoopSourceContext.init(
-        version: 0, info: unsafeBitCast(self, to: UnsafeMutableRawPointer.self), retain: nil,
-        release: nil, copyDescription: nil, equal: nil, hash: nil, schedule: nil, cancel: nil,
-        perform: nil)
-      let runLoopSource: CFRunLoopSource = CFRunLoopSourceCreate(kCFAllocatorDefault, 0, &context)
-      let runLoop: CFRunLoop = RunLoop.current.getCFRunLoop()
-      CFRunLoopAddSource(runLoop, runLoopSource, .defaultMode)
-      while !Thread.current.isCancelled {
-        _ = autoreleasepool {
-          RunLoop.current.run(mode: RunLoop.Mode.default, before: Date.distantFuture)
-        }
-      }
-    }
-    return environmentOperation
   }
 
   /// 添加一个 operation 到队列。
@@ -162,6 +144,21 @@ public final class SwiftyThreadPool: @unchecked Sendable {
     lock.unlock()
   }
 
+  /// 2.0 删除了 1.x 的 `prepareEnvironment()` —— 一个在 init 里投递、跑一个
+  /// 常驻 RunLoop 的 BlockOperation。删除的理由,按重要性排:
+  ///
+  /// 1. **它让本类型永远无法 deinit。** 那个闭包强引用 self,而循环条件
+  ///    `while !Thread.current.isCancelled` 永远不会成立:`op.cancel()` 置的是
+  ///    *operation* 的标志位,不是线程的。operation 因此永不结束,对 self 的
+  ///    强引用永不解除 —— 下面这个 deinit(以及其中针对 B18 的观察者撤销)
+  ///    从来就执行不到。回归测试:testPoolDeallocatesAfterCancel。
+  /// 2. **它白占一条线程。** 池子的并发下限是 3,被它永久占去一条。
+  /// 3. **它什么也没做。** 那个 CFRunLoopSource 的 `perform` 回调是 nil,
+  ///    即使被唤醒也不会执行任何东西;全仓库没有任何代码往它上面投递工作。
+  /// 4. **删掉恰好恢复 1.x 的可观察行为。** 1.x 里这次 add 排在
+  ///    `self.queue = queue` **之前**,`guard let queue = currentQueue` 直接失败,
+  ///    这个 operation 从来没有真正入过队。是 B9 修正了赋值顺序之后,它才第一次
+  ///    跑起来 —— 也才第一次开始造成上面 1/2 两条危害。
   deinit {
     if let observer = memoryWarningObserver {
       NotificationCenter.default.removeObserver(observer)
