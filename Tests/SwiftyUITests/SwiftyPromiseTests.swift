@@ -748,4 +748,42 @@ final class SwiftyPromiseTests: XCTestCase {
       XCTFail("value() 挂死了 —— 正是本次要修的回归")
     }
   }
+
+  // MARK: - 终结后追加 then/always(issue #4)
+
+  /// 链条终结后,追加任务必须被拒绝。
+  ///
+  /// 直接测内部的 appendTaskIfUnfinished / appendAlwaysIfUnfinished,而不是
+  /// 调 then {} —— 后者在 debug 下会 assertionFailure 中止整个测试进程。
+  /// 断言的是"拒绝"这个 release 与 debug 都成立的部分。
+  func testAppendingAfterTerminationIsRejected() async throws {
+    let pool = SwiftyThreadPool()
+    let promise = Promise<Int>.firstly(pool: pool, on: .background) { (update, _) in
+      update(1)
+    }
+    _ = try await withTestTimeout { try await promise.value() }
+    // 此时链条已终结
+
+    XCTAssertFalse(
+      promise.debugAppendTaskAccepted(),
+      "链条终结后追加链条任务必须被拒绝")
+    XCTAssertFalse(
+      promise.debugAppendAlwaysAccepted(),
+      "链条终结后追加 always 任务必须被拒绝")
+  }
+
+  /// 反面对照:链条尚未终结时,追加必须被接受。
+  /// 没有这一条,上面那个测试在"永远返回 false"的实现下也会绿。
+  func testAppendingBeforeTerminationIsAccepted() {
+    let pool = SwiftyThreadPool()
+    pool.stop()  // 不让它真的跑起来,链条保持未终结
+    defer { pool.restart() }
+
+    let promise = Promise<Int>.firstly(pool: pool, on: .background) { (update, _) in
+      update(1)
+    }
+
+    XCTAssertTrue(promise.debugAppendTaskAccepted(), "链条未终结时追加必须被接受")
+    XCTAssertTrue(promise.debugAppendAlwaysAccepted(), "链条未终结时追加必须被接受")
+  }
 }

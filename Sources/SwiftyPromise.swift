@@ -281,26 +281,52 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
 
   // MARK: - 链式
 
+  /// 往链条尾部追加一个任务。
+  ///
+  /// - Important: 链条一旦终结(start()/catch(_:)/value() 任一调用过且已跑完),
+  ///   本方法追加的任务**永远不会执行**。2.1 起这在 debug 构建下会
+  ///   assertionFailure;release 构建保持无操作。Promise 是一次性的。
   @discardableResult
   public func then(
     with identifier: String? = nil, on perform: ThreadPerform = .background,
     _ work: (@Sendable () throws -> Void)?
   ) -> Promise {
     let built = operationBuild(work)
-    withState { tasks.append(.create(identifier, perform, built.op, runFlag: built.flag)) }
+    if !appendTaskIfUnfinished(.create(identifier, perform, built.op, runFlag: built.flag)) {
+      // 编程错误,不是运行时错误:链条已经终结,这个任务永远不会被执行。
+      // debug 当场暴露;release 保持无操作(与 2.0 行为一致)。
+      //
+      // 不选"立即执行":那会让 isFinished 不再是终态,与它作为全局门闩的
+      // 现有设计矛盾;且立即执行的 then 若抛错,fire() 不会再推进,错误
+      // 无人接收 —— 又制造一处静默丢弃。
+      assertionFailure("向已终结的 Promise 追加 then;该任务永远不会执行")
+    }
     return self
   }
 
+  /// 往链条尾部追加一个能读写链条当前值的任务。
+  ///
+  /// - Important: 链条一旦终结(start()/catch(_:)/value() 任一调用过且已跑完),
+  ///   本方法追加的任务**永远不会执行**。2.1 起这在 debug 构建下会
+  ///   assertionFailure;release 构建保持无操作。Promise 是一次性的。
   @discardableResult
   public func then(
     with identifier: String? = nil, on perform: ThreadPerform = .background,
     work: @escaping @Sendable (_ update: (T?) -> Void, _ value: T?) throws -> Void
   ) -> Promise {
     let built = operationBuildT(work)
-    withState { tasks.append(.create(identifier, perform, built.op, runFlag: built.flag)) }
+    if !appendTaskIfUnfinished(.create(identifier, perform, built.op, runFlag: built.flag)) {
+      // 理由与上一个 then 完全相同,见那里的说明。
+      assertionFailure("向已终结的 Promise 追加 then;该任务永远不会执行")
+    }
     return self
   }
 
+  /// 追加一个无论链条成功与否都会在终结之后执行的任务。
+  ///
+  /// - Important: 链条一旦终结(start()/catch(_:)/value() 任一调用过且已跑完),
+  ///   本方法追加的任务**永远不会执行**。2.1 起这在 debug 构建下会
+  ///   assertionFailure;release 构建保持无操作。Promise 是一次性的。
   @discardableResult
   public func always(
     with identifier: String? = nil, on perform: ThreadPerform = .background,
@@ -313,7 +339,9 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
       flag.markRun()
       _ = try? work?()
     }
-    withState { alwaysTasks.append(.create(identifier, perform, operation, runFlag: flag)) }
+    if !appendAlwaysIfUnfinished(.create(identifier, perform, operation, runFlag: flag)) {
+      assertionFailure("向已终结的 Promise 追加 always;该任务永远不会执行")
+    }
     return self
   }
 
@@ -492,6 +520,35 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
       alwaysTasks.append(task)
       return true
     }
+  }
+
+  /// 仅在链条尚未终结时追加一个链条任务;检查与追加在同一个临界区内完成。
+  /// 返回 false 表示链条已经终结,此时 tasks 不会再被 fire() 排空,
+  /// 调用方不能指望这个任务将来会被执行。
+  ///
+  /// 与 appendAlwaysIfUnfinished 同一条理由:先查后加只是把竞争窗口缩小,
+  /// 而不是消除。
+  private func appendTaskIfUnfinished(_ task: PromiseTask) -> Bool {
+    withState {
+      guard !isFinished else { return false }
+      tasks.append(task)
+      return true
+    }
+  }
+
+  /// 仅供测试:走一遍真实的追加路径并返回是否被接受,不触发 assertionFailure。
+  ///
+  /// 测试不能直接调 then {} —— debug 下 assertionFailure 会中止测试进程。
+  internal func debugAppendTaskAccepted() -> Bool {
+    let built = operationBuild(nil)
+    return appendTaskIfUnfinished(.create(nil, .background, built.op, runFlag: built.flag))
+  }
+
+  /// 仅供测试:同上,针对 always 队列。
+  internal func debugAppendAlwaysAccepted() -> Bool {
+    let flag = RunFlag()
+    return appendAlwaysIfUnfinished(
+      .create(nil, .background, BlockOperation { flag.markRun() }, runFlag: flag))
   }
 
   /// 终结只生效一次:重复调用 start()/catch(),或两者都调用,都不会二次推进链条
