@@ -363,9 +363,10 @@ final class SwiftyPromiseTests: XCTestCase {
     }
   }
 
-  /// value() 内部让 always 闭包强引用 self,以避免闭包真正执行前 self
-  /// 被提前释放(见 Sources/SwiftyPromise.swift 中 value() 的注释)。
-  /// 这里验证这个选择不会造成永久循环引用:链条终结后应当仍能被释放。
+  /// value() 内部让 always 闭包强引用 self——这是防御性的写法(见
+  /// Sources/SwiftyPromise.swift 中 value() 的注释),会构成一个瞬态的
+  /// 自引用环。这里验证这个环不是永久的:链条终结后 Promise 应当仍能
+  /// 被释放。
   func testAsyncValuePromiseIsReleasedAfterCompletion() async throws {
     weak var weakPromise: Promise<String>?
 
@@ -386,5 +387,36 @@ final class SwiftyPromiseTests: XCTestCase {
       try await Task.sleep(nanoseconds: 50_000_000)
     }
     XCTAssertNil(weakPromise, "value() 完成后 Promise 应被释放(不能有循环引用)")
+  }
+
+  /// 审查发现:value() 在链条已经被别的终结符终结之后调用会永久挂起
+  /// ——always() 无条件追加而不查 isFinished,catch() 的 beginIfNeeded()
+  /// 在 isStarted 已置位时直接返回,fire() 便不会再被触发,append 进去的
+  /// always 任务永远不会被排空。这与既有契约矛盾:
+  /// testTerminatorStartsChainOnlyOnce 明确断言重复终结符是良性的。
+  ///
+  /// 这里覆盖"先 start(),链条跑完之后再 value()"的场景。
+  func testAsyncValueAfterStartDoesNotHang() async throws {
+    let promise = Promise<String>.firstly(on: .background) { update, _ in
+      update("done")
+    }
+    promise.start()
+    // 等链条确实跑完,确保下面的 value() 调用命中的是"已终结"分支,
+    // 而不是"已启动但仍在飞行中"这条本来就正确的路径。
+    try await Task.sleep(nanoseconds: 300_000_000)
+    let value = try await promise.value()
+    XCTAssertEqual(value, "done")
+  }
+
+  /// 同一个问题的另一种触发方式:对同一个 Promise 连续调用两次 value()。
+  /// 第一次调用 await 返回时链条必然已经终结,第二次调用必须走"已终结"
+  /// 分支立即返回,而不是挂起。
+  func testAsyncValueCalledTwiceDoesNotHang() async throws {
+    let promise = Promise<String>.firstly(on: .background) { update, _ in
+      update("once")
+    }
+    _ = try await promise.value()
+    let second = try await promise.value()
+    XCTAssertEqual(second, "once")
   }
 }

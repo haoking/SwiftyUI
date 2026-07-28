@@ -209,10 +209,21 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
 
   /// 终结链条并以 await 取回最终值。
   ///
-  /// 链条中的错误经由 throws 抛出。与 start() / catch(_:) 一样,
-  /// 本方法也是终结符——同一个 Promise 只能终结一次;内部借道
-  /// catch(_:) 复用同一把 isStarted 门闩(见 beginIfNeeded()),不另开
-  /// 新的启动路径。
+  /// 与 start() / catch(_:) 一样,本方法也是终结符。但重复终结对它是良性
+  /// 的:调用时如果链条已经终结过(无论是被更早一次 start()、catch(_:)
+  /// 还是 value() 调用终结的),本方法不会像 then()/always() 那样把回调
+  /// 静默丢进一个不会再被处理的队列里、把调用方永远挂起——而是立即以链条
+  /// 终结时的最后一个值返回。即便链条当初是因为出错才终结的,这种情况下
+  /// 也**不会**重新抛出那个错误(错误对象本身没有被保留下来),而是照样
+  /// 返回最后的值。
+  ///
+  /// - Important: 没有任何任务调用过 update(...) 时,返回值是 nil——
+  ///   `Promise<Void>.value()` 因此恒为 nil,不是 `()`。
+  /// - Important: 这个 await **不响应** Swift Task 的取消:所在 Task 被
+  ///   取消后,本方法仍会一直等到链条终结才返回或抛错。
+  /// - Important: 如果链条本身永远无法终结(例如 SwiftyThreadPool 被
+  ///   cancel()/stop() 导致后续 operation 不再执行),本方法也永远不会
+  ///   返回。
   public func value() async throws -> T? {
     return try await withCheckedThrowingContinuation { continuation in
       // 用一个 box 保证 continuation 只被恢复一次:链条正常结束与出错
@@ -223,25 +234,63 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
       // completionBlock 触发的下一次 fire())。
       let resumed = ResumeGuard()
 
-      self.always(on: .background) {
-        // 这里刻意用强 self,不用 [weak self]:fire() 只在 .run(下一个
-        // 常规任务) 时才会设置 completionBlock = { self.fire() } 来强引用
-        // self;轮到 .finish(即将执行 always 任务)时不会再设这层强引用。
-        // 也就是说,常规任务链跑完的那一刻,原本撑住 self 的强引用就已经
-        // 释放——如果这个闭包只弱引用 self,self 就可能在 always 任务被
-        // 目标队列真正调度到之前被提前释放,读到的 currentValue 会被错误
-        // 地当成 nil。改成强引用后,这个闭包本身(经 alwaysTasks ->
-        // Operation -> 目标队列)成为新的强引用链,一直撑到 always 任务
-        // 执行完毕。不会造成永久循环引用:fire() 终结链条时会把
-        // alwaysTasks 转交给目标队列并清空自己的引用,任务跑完后队列释放
-        // Operation,循环随之打破(回归测试见
-        // testAsyncValuePromiseIsReleasedAfterCompletion)。
+      let alwaysOperation = BlockOperation {
+        // 强引用 self,不用 [weak self]——这是防御性的,不是纠正性的:
+        // self 是这次正在进行的 async 调用(value() 本身)的接收者,按
+        // Swift 的调用约定,在整个 await 期间(包括跨越挂起点)都会被
+        // 保留,所以这里就算改成弱引用,self 也不会真的变成 nil。出错
+        // 路径上更是如此:下面这行 guard 严格先于任何 self 的解引用
+        // 执行,claim 失败时根本不会碰 self。保留强引用只是让"这里不
+        // 依赖 self 的生死"这件事更直白,不必依赖上面这层不太显眼的
+        // 调用约定论证。
+        //
+        // 这确实构成一个瞬态的自引用环(self -> alwaysTasks 或下面的
+        // pending -> PromiseTask.op -> 这个闭包 -> self),但只要链条能
+        // 到达 fire() 的 .finish 分支(正常跑完、出错终结都算),就会
+        // 确定性打破:fire() 把 alwaysTasks 转交给目标队列并清空自己的
+        // 引用,任务跑完后队列释放 Operation,环随之断开(回归测试见
+        // testAsyncValuePromiseIsReleasedAfterCompletion)。如果链条根本
+        // 到不了 .finish(见上面 value() 文档注释的第三条),这个环连同
+        // 整条链一起泄漏——但这不是本方法引入的新风险,start()/catch()
+        // 面对同一种情形也一样跑不完。
         guard resumed.claim() else { return }
         continuation.resume(returning: self.currentValue)
-      }.catch { error in
+      }
+
+      // 注册与"链条是否已经终结"的判断必须在同一个临界区内完成
+      // (appendAlwaysIfUnfinished 内部经 withState),否则只是把竞争
+      // 窗口缩小,而不是消除:如果先查后加,fire() 可能恰好在两次访问
+      // 之间把 alwaysTasks 排空,让这次追加白追加。
+      guard appendAlwaysIfUnfinished(.create(nil, .background, alwaysOperation)) else {
+        // 链条已经终结:上面这个 always 任务永远不会被 fire() 排空到,
+        // 也就永远不会执行。立即以当前值恢复,不再调用 catch(_:)——
+        // 那会把已经注册过的 errorBlock 覆盖掉,而链条已经终结,不会再
+        // 产生新的错误,调用也没有意义。
+        guard resumed.claim() else { return }
+        continuation.resume(returning: self.currentValue)
+        return
+      }
+
+      // 链条尚未终结:可能是全新链条(本次调用是第一个终结符),也可能
+      // 链条已经被别的终结符启动、正在飞行中——两种情况下追加都是正确
+      // 的,fire() 迟早会走到 .finish 并排空 alwaysTasks。catch(_:) 内部
+      // 经同一把 isStarted 门闩(beginIfNeeded())判断是否真的需要启动;
+      // 已经在飞行中时它只负责登记 errorBlock,不会二次推进链条。
+      self.catch { error in
         guard resumed.claim() else { return }
         continuation.resume(throwing: error)
       }
+    }
+  }
+
+  /// 仅在链条尚未终结时追加一个 always 任务;检查与追加在同一个临界区内
+  /// 完成。返回 false 表示链条已经终结(isFinished),此时 alwaysTasks
+  /// 不会再被 fire() 排空,调用方不能指望这个任务将来会被执行。
+  private func appendAlwaysIfUnfinished(_ task: PromiseTask) -> Bool {
+    withState {
+      guard !isFinished else { return false }
+      alwaysTasks.append(task)
+      return true
     }
   }
 
