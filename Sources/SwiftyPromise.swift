@@ -381,8 +381,14 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
   /// - Important: 链条被取消时(例如 SwiftyThreadPool 收到内存告警调用
   ///   removeAll()),本方法抛出 `PromiseError.cancelled`。这一点自 2.1 起
   ///   成立;2.0 在这种情形下会永久挂起。
-  /// - Important: 如果链条因为别的原因永远无法终结(例如线程池被 stop()
-  ///   之后再没 restart()),本方法仍然不会返回。
+  /// - Important: 如果链条因为别的原因永远无法终结,本方法仍然不会返回。
+  ///   两种已知情形:线程池被 `stop()` 之后再没 `restart()`;以及线程池在
+  ///   本链条投递之前就被 `cancel()` 过 —— 此时 `add()` 内部的
+  ///   `guard let queue = currentQueue` 直接放弃,operation 根本没有进过
+  ///   任何队列,也就永远不会有 completionBlock 触发,上面那条取消路径
+  ///   接不住它。注意 `cancel()` 横跨两种情形:在它之前就已排队的
+  ///   operation 会被取消,那条路径**会**抛 `.cancelled`;在它之后才投递的
+  ///   则被静默丢弃,落到本条。
   public func value() async throws -> T? {
     return try await withCheckedThrowingContinuation { continuation in
       // 用一个 box 保证 continuation 只被恢复一次:链条正常结束与出错
