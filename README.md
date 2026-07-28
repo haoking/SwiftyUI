@@ -14,7 +14,7 @@ High performance and lightweight UIView, UIImage, UIImageView, UIlabel, UIButton
 - [x] SwiftyImageView 150% High performance more than UIImageView, depending on UIView-package, Image-GPU and Image-Cache
 - [x] SwiftyLabel 300% High performance more than UIlabel, depending on UIView-package and TextKit
 - [x] SwiftyButton 300% High performance more than UIButton, depending on UIControl-package, TextKit and BackgroundImage-Advanced
-- [x] SwiftyToast is depend on globalCenter and show the toast without overlap.
+- [x] SwiftyToast queues toasts on a shared, main-actor-isolated centre and shows them one at a time, so they never overlap
 - [x] SwiftyAlert contains SuccessAlert, ErrorAlert, WarningAlert, InfoAlert, EditAlert and their special styles.
 - [x] lightweight, almost one class for each UI
 - [x] UI mutations are confined to the main thread at compile time, enforced via `@MainActor`
@@ -166,6 +166,8 @@ colors from Image, also return block is on main thread:
 ```swift
 import SwiftyUI
 
+let myImage : UIImage? = UIImage.load("aImage")
+
 myImage?.colors({ (background, primary, secondary, detail) in
     print("background color: \(background)")
     print("primary color: \(primary)")
@@ -180,14 +182,18 @@ There are several `UIImage` extensions designed to make the common image manipul
 
 #### Inflation
 
+`inflate()` forces a compressed image (PNG, JPEG, …) to be decoded now, and records that it has been. Otherwise the decode happens lazily, on the main thread, the first time the image is drawn — precisely when you can least afford it.
+
 ```swift
-let myImage : UIImage? = UIImage.load("aImage")
+let myImage : UIImage? = UIImage(named: "aImage")
 myImage?.inflate()
 ```
 
-> `UIImage.load(_:)` returns `UIImage?` — it is `nil` when no asset with that name exists. Every example below unwraps it accordingly.
+> Do this off the main thread when you are decoding many or large images. Decoding early is only a win if it happens somewhere the main thread isn't waiting.
 
-> Inflating compressed image formats (such as PNG or JPEG) in a background queue can significantly improve drawing performance on the main thread.
+> `UIImage.load(_:)` already calls `inflate()` for you before it caches, and `inflate()` returns immediately if the image is already inflated. Calling it on an image that came from `UIImage.load(_:)` therefore does nothing at all — hence `UIImage(named:)` above.
+
+> `UIImage.load(_:)` returns `UIImage?` — it is `nil` when no asset with that name exists. Every example below unwraps it accordingly.
 
 #### Scaling
 
@@ -228,7 +234,7 @@ let imageCachePool : ImageCachePool = .default
 
 #### Add / Remove / Fetch Images
 
-Interacting with the `ImageCache` protocol APIs is very straightforward.
+Interacting with the `ImageCacheable` protocol APIs is very straightforward.
 
 ```swift
 let imageCachePool : ImageCachePool = .default
@@ -296,6 +302,7 @@ myLable.frame = CGRect.init(x: 50, y: 300 + 20 + 20, width: 100, height: 100)
 SwiftyButton is a better performance than UIButton and can be used like a standard UI component. Also, Easier to use than UIButton because of block-package and mistake double tap IgnoreEvent. Since UIControl is inherited instead of UIbutton, there is little wasteful processing. It uses the function of TextKit to draw characters and Image feature from GPU.
 
 ```swift
+let myImage : UIImage? = UIImage.load("btnBG")
 let myBtn : SwiftyButton = SwiftyButton("Button", myImage, ClosureWrapper({ [weak self] (btn) in
 
             guard let strongSelf = self, let btn = btn else { return }
@@ -321,13 +328,15 @@ Timer.after(5.0, ClosureWrapper({ (timer) in
 
 ### SwiftyToast
 
-SwiftyToas is depend on global runloop cente, also show the toast without overlap.
+Toasts never overlap: each one is queued on a shared centre and shown only after the previous one has finished fading out.
 
 ```swift
 _ = SwiftyToast("This is a Toast")
 ```
 
-> Creating the toast is what shows it — it enqueues itself with `SwiftyToastCenter.default`, so you rarely need to keep the returned instance. Discard it explicitly with `_ =` to avoid an unused-result warning.
+> Creating the toast is what shows it — the initializer enqueues it, so you rarely need to keep the instance. Discard it explicitly with `_ =` to avoid an unused-result warning. `SwiftyToast.cancel()` drops everything still queued.
+
+> No RunLoop is involved. The queue is `@MainActor`-isolated and display is driven by a `Task` on the main actor; 1.x's "global runloop center" is gone. The toast's geometry is computed when it is actually shown, not when it is created, so a toast that waits in the queue across a device rotation still lands correctly — see **B22** in the CHANGELOG.
 
 ### SwiftyAlert
 
@@ -338,10 +347,10 @@ let alert: SwiftyAlertView = .create()
 
 _ = alert.addTextField()
 
-_ = alert.addButton("First Button", action: {
+alert.addButton("First Button", action: {
     print("First Button tapped")
 })
-_ = alert.addButton("Second Button") {
+alert.addButton("Second Button") {
     print("Second button tapped")
 }
 
@@ -377,6 +386,8 @@ Everyone knows PromiseKit and its story. I also use this library in my code. But
 If you dont need send value from different threads in a Premise, it will be simple:
 
 ```swift
+struct SimpleError: Error {}   // your own error type — SwiftyUI does not ship one
+
 Promise<Void>.firstly(with: nil, on: .background) {
 
     print("Promise<Void>---task1----Thread:\(Thread.current)")

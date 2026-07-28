@@ -94,6 +94,20 @@ jobs:
         timeout-minutes: 10
         run: Scripts/test.sh
 
+      - name: 校验 README 的代码块与类型名
+        # README 与源码已经漂移过两次,第二次是在一轮"专门修事实错误"之后。
+        # 上一轮其实做过一次人工校验,但校验文件用完就删了,没有留下常设机制。
+        # 这一步就是那个机制:代码块全部抽出来编译(含自足性),
+        # 正文里点名的类型必须真的存在且 public。
+        # 放在"构建库"之后:它需要现成的 SwiftyUI.swiftmodule。
+        run: Scripts/check-readme.sh
+
+      - name: 校验 uitest.sh 会还原模拟器全局偏好
+        # uitest.sh 必须改本机全局的 ConnectHardwareKeyboard 才能让软件键盘出现
+        # 在屏幕内,那是 Simulator.app 的机器级设置。这一步断言它跑完会原样还原,
+        # 不把使用者(以及 runner)的开发环境永久改掉。
+        run: Scripts/check-uitest-restore.sh
+
       - name: 构建示例工程
         run: |
           set +e
