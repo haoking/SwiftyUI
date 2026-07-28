@@ -206,4 +206,44 @@ extension SwiftyColorTests {
       "primary 应为 body 色浅黄;若明显低于 1.0 说明抗锯齿混合像素又胜出了")
     XCTAssertGreaterThan(pri.greenValue, 0.9)
   }
+
+  /// B12(整数除法)的真正回归 —— 此前**从未被任何测试触发过**。
+  ///
+  /// 出问题的那行(SwiftyColor.swift 里 `CGFloat(countedColor.count) /
+  /// CGFloat(proposedEdgeColor.count) > 0.3`)位于
+  /// `proposedEdgeColor.color.isBlackOrWhite` 分支内,而在本测试之前的每一个
+  /// 夹具,主导边缘色都是彩色,该分支从不进入:把那行还原成
+  /// `CGFloat(countedColor.count / proposedEdgeColor.count)` 的整数除法形式,
+  /// 整套测试仍然全绿。这正是"测试通过但什么都没保护"的典型。
+  ///
+  /// 本测试补上缺的那个夹具:边缘采样条带里 70% 是纯白(命中 isBlackOrWhite,
+  /// 从而真正进入那条分支),30% 是深蓝。
+  ///
+  /// - 浮点除法(正确):1350/3150 ≈ 0.43 > 0.3,深蓝通过筛选且不是黑白,
+  ///   被选为背景色。
+  /// - 整数除法(缺陷):sortedColors 已按出现次数降序,除首元素外整数商恒为 0,
+  ///   `where` 直接把深蓝排除;而首元素就是纯白自己,`!isBlackOrWhite` 不成立,
+  ///   循环空转,背景色停留在纯白 —— 0.3 这个阈值形同虚设。
+  func testImageColorsReplacesBlackOrWhiteEdgeWithChromaticColor() {
+    let image = TestSupport.makeEdgeDiscriminatingImage(
+      majorityEdge: .white,
+      minorityEdge: UIColor(red: 0.15, green: 0.2, blue: 0.9, alpha: 1),
+      body: UIColor(red: 0.55, green: 0.55, blue: 0.2, alpha: 1)
+    )
+    let done = expectation(description: "colors 回调")
+    let background = Box<UIColor?>(nil)
+    image.colors { bg, _, _, _ in
+      background.value = bg
+      done.fulfill()
+    }
+    wait(for: [done], timeout: 10.0)
+
+    let bg = try! XCTUnwrap(background.value)
+    XCTAssertGreaterThan(
+      bg.blueValue, 0.5,
+      "主导边缘色是纯白时,应换用比例超过 0.3 的彩色边缘色(深蓝)作为背景色")
+    XCTAssertLessThan(
+      bg.redValue, 0.5,
+      "背景色若仍是纯白,说明那行又变回了整数除法,0.3 的阈值形同虚设(B12)")
+  }
 }

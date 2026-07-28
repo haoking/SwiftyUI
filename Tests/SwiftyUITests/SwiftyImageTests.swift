@@ -132,6 +132,41 @@ final class SwiftyImageTests: XCTestCase {
       "查找失败不应把占位内容写入缓存")
   }
 
+  // MARK: - B14 回归
+
+  /// B14:1.x 的四个 `UIImage.load` 每次调用都现场 `let lock = NSLock()` 造一把
+  /// **局部**锁再 lock/unlock。局部锁提供不了任何互斥 —— 每个调用者锁的是自己
+  /// 那把,纯属开销。真正需要互斥的共享状态在 ImageCachePool 内部,由它那把
+  /// **共享**锁保护(B4)。2.0 直接删掉了这些局部锁。
+  ///
+  /// 删除本身是纯开销移除,没有留下可断言的行为;能锁住的是这次删除所依赖的
+  /// 那条前提:`UIImage.load` 的并发安全由 ImageCachePool 的共享锁提供。
+  /// 本测试并发跑 load 的写路径与读路径,断言写进去的每一项都还在、且能读出。
+  ///
+  /// 判别力(已实测):去掉 ImageCachePool 的 lock,本测试崩溃;此时再把 1.x
+  /// 那把局部锁加回 UIImage.load,依然崩溃 —— 那正是 B14 的论点。
+  func testConcurrentLoadIsSerializedByTheCachePoolLock() {
+    let prefix = "SwiftyImageTests.b14.\(UUID().uuidString)"
+    let keyCount = 40
+    let cache = ImageCachePool.default
+    defer {
+      for index in 0..<keyCount { cache.removeImage(withIdentifier: "\(prefix).\(index)") }
+    }
+
+    let image = TestSupport.makeSolidImage(color: .red, size: CGSize(width: 8, height: 8))
+    DispatchQueue.concurrentPerform(iterations: 400) { index in
+      let identifier = "\(prefix).\(index % keyCount)"
+      _ = UIImage.load(image, identifier: identifier)  // 写路径:inflate + add
+      _ = UIImage.load(identifier)  // 读路径:命中缓存
+    }
+
+    for index in 0..<keyCount {
+      XCTAssertNotNil(
+        UIImage.load("\(prefix).\(index)"),
+        "并发写入的第 \(index) 项应当仍在缓存里 —— 丢失说明缓存写入没有被真正串行化")
+    }
+  }
+
   /// 缓存未命中 + asset 存在:这条分支要求 UIImage(named:) 真的能找到一张图片。
   /// 单元测试 bundle 不携带任何 image asset(加 fixture 需要改动 Package.swift 的
   /// resources 声明,超出本任务范围),因此这里用 XCTSkip 显式记录限制,
