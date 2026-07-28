@@ -55,7 +55,7 @@ Or, add it to the dependencies value of your `Package.swift`:
 
 ```ruby
 dependencies: [
-    .package(url: "https://github.com/haoking/SwiftyUI.git", .upToNextMajor(from: "2.0.0"))
+    .package(url: "https://github.com/haoking/SwiftyUI.git", .upToNextMajor(from: "2.1.0"))
 ]
 ```
 
@@ -86,6 +86,21 @@ Then, run the following command:
 ```bash
 $ pod install
 ```
+
+---
+
+## Migration from 2.0
+
+2.1.0 breaks nothing: every signature from 2.0 still compiles, and there is nothing you have to change. What _does_ change is what a **cancelled** promise chain does — and cancellation is not an exotic case, because `SwiftyThreadPool` cancels every operation in its queue when the app takes a memory warning, and `UIImage.colors(_:)` is built on a promise chain.
+
+| Change                                                                                                         | What it means for you                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| -------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A cancelled task fails its chain with `PromiseError.cancelled`                                                 | Previously the chain skipped the cancelled step, carried on with the value the previous step had left behind, and settled _successfully_. A `catch(_:)` handler that never used to fire on a memory warning can now fire; a chain that used to produce a plausible-looking result from stale data now fails instead                                                                                                                                                                                  |
+| `try await promise.value()` throws `PromiseError.cancelled` instead of hanging forever or returning stale data | 2.0 did one of two things depending on _what_ got cancelled: if a chain task was cancelled it returned normally with the previous step's value; if `value()`'s own completion task was cancelled it suspended permanently, with no timeout. Neither is something working code can have depended on. Handle the error, or let it propagate. Note that this is a partial fix — three known cases still hang, all listed under [SwiftyPromise](#swiftypromise) and in `value()`'s documentation comment |
+| A `then` or `always` appended to a chain that has already settled calls `assertionFailure`                     | Debug builds now trap where 2.0 silently did nothing. Such a task could never have run, so this only surfaces code that was already dead — but check for it before handing a debug build to testers                                                                                                                                                                                                                                                                                                  |
+| `UIImage.colors(_:)`'s callback is not invoked when the analysis fails or is cancelled                         | Behaviour unchanged since 2.0; it is simply documented now. If you show a spinner while it runs, it will spin forever in that case. Switch to the new `colors() async throws` when you need a deterministic outcome                                                                                                                                                                                                                                                                                  |
+
+Full detail is in [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
@@ -175,6 +190,25 @@ myImage?.colors({ (background, primary, secondary, detail) in
     print("detail color: \(detail)")
 })
 ```
+
+> The callback is **not** invoked if the analysis fails or is cancelled — and cancellation is not exotic: the analysis runs on `SwiftyThreadPool`, which cancels everything in its queue when the app takes a memory warning. There is no signal of any kind in that case, so a spinner you started before the call will spin forever. This has been true since 2.0; use the `async` variant below when you need a deterministic outcome.
+
+The `async` variant runs the same analysis and returns the same four colours, but throws instead of going quiet:
+
+```swift
+func applyDominantColor(of image: UIImage) async {
+    do {
+        let (background, _, _, _) = try await image.colors()
+        view.backgroundColor = background
+    } catch {
+        // PromiseError.cancelled if the analysis was cancelled,
+        // PromiseError.noValue if the image went away before it started.
+        view.backgroundColor = .systemBackground
+    }
+}
+```
+
+> Being an ordinary `async` function, it resumes on whatever context you awaited it from — there is no main-thread guarantee to inherit, and none is needed. The callback version's guarantee stands unchanged.
 
 ### UIImage Extensions
 
@@ -456,6 +490,53 @@ func run() async throws {
     print(result ?? "nil") // "abc!"
 }
 ```
+
+#### Cancellation
+
+A chain's `.background` tasks run on `SwiftyThreadPool`, and the shared pool cancels every operation in its queue when the app takes a memory warning. (`.main` tasks go to the main queue instead, out of the pool's reach.) As of 2.1 a chain notices: if a task is cancelled before its block starts running, the chain fails with `PromiseError.cancelled` rather than skipping that step and carrying on with the previous step's value.
+
+```swift
+Promise<String>.firstly(on: .background) { (update, _) in
+    update("abc")
+}.then { (update, str) in
+    update((str ?? "") + "!")
+}.catch { error in
+    if error as? PromiseError == .cancelled {
+        print("the chain was cancelled before it could finish")
+    } else {
+        print("failed: \(error)")
+    }
+}
+```
+
+`value()` throws the same error:
+
+```swift
+func load() async {
+    do {
+        let result = try await Promise<String>.firstly(on: .background) { (update, _) in
+            update("abc")
+        }.value()
+        print(result ?? "nil")
+    } catch PromiseError.cancelled {
+        print("the chain was cancelled before it could finish")
+    } catch {
+        print("failed: \(error)")
+    }
+}
+```
+
+`PromiseError` is the library's own error type — the one the chain machinery raises, as opposed to whatever your task bodies throw. It has two cases: `.cancelled`, above, and `.noValue`, which only `UIImage.colors()` produces (`value()` itself returns `nil` for a chain that never called `update(...)`, it does not throw).
+
+Three things are worth knowing about the edges of this:
+
+- **A cancel that arrives while a task is running does not count.** The task body isn't interrupted — it runs to completion — so treating it as cancelled would throw away a valid result. The rule is: cancel fails the chain, _unless_ the work had already finished, in which case the chain keeps its result and carries on.
+- **`start()` has nowhere to put the error.** It deliberately registers no handler, so a cancelled chain terminated with `start()` just stops. Terminate with `catch(_:)` or `value()` if you need to hear about it. An `always` task of your own that gets cancelled is likewise silent — by the time `always` tasks run the chain has settled and there is no error path left.
+- **`value()` can still fail to return, and cancellation is not fully solved.** Cancelling an operation doesn't end it; the queue reaching it is what ends it. So if the queue cannot drain, nothing fires. Concretely, `await value()` still hangs if the pool was `stop()`ped and never `restart()`ed, if the pool was `cancel()`ed at any point before the chain's next background task was dispatched (`cancel()` drops the internal queue, and `add` silently discards everything after that — a `cancel()` landing mid-chain strands the next step just as surely as one that preceded the chain), or if the pool was cancelled or emptied _while suspended_ — a suspended queue finishes nothing, cancelled operations included. In that last case `restart()` gets you out again if the pool was only emptied; if it was `cancel()`ed there is no way back at all, because `cancel()` drops the internal queue and `restart()` cannot resurrect it. These are the three _known_ cases, and they are listed in `value()`'s documentation comment.
+
+#### A `Promise` is single-use
+
+Once a chain has been terminated and has finished, its task queues are never drained again — so a `then` or `always` appended after that point can never run. Since 2.1 that mistake calls `assertionFailure`, which traps in debug builds; release builds keep doing nothing, as before. Build a new chain instead of reusing a finished one.
 
 ---
 
