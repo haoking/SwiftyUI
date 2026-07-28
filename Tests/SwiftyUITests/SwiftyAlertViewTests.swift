@@ -15,9 +15,15 @@ import XCTest
 ///    "showTitle 的成功分支确实调用了 addKeyboardObservers()"这一条连接,
 ///    单元测试环境无法覆盖,只能靠代码审查与 iOSExample 人工验收。
 ///
-/// 键盘观察者的注册/撤销**不**挂在 viewDidAppear / viewDidDisappear 上:
-/// SwiftyAlertView 把自己的 view 直接 addSubview 到 window 上,不 present、
-/// 不做容器包含,UIKit 从不为它调用那两个回调 —— 挂在那里等于永不执行。
+/// 键盘观察者的注册/撤销**不**挂在 viewDidAppear / viewDidDisappear 上,
+/// 而是由 showTitle / hideView() 驱动。
+///
+/// 理由**不是**"那两个回调不触发"。实测(iOS 26.5 模拟器)它们会触发,
+/// 尽管 SwiftyAlertView 只是把自己的 view 裸 addSubview 到 window 上 ——
+/// 不 present、不做容器包含、也不是 rootViewController,按经典 UIKit 规则
+/// 这种位置的控制器不该收到外观回调,而实际行为与规则不符。
+/// 真正的理由是**不去依赖这个没有契约保证的行为**,外加与本类型自带的展示
+/// 生命周期(selfReference 自持有/清理)确定性配对。
 /// 详见 Sources/SwiftyAlertView.swift 中 addKeyboardObservers() 的说明。
 @MainActor
 final class SwiftyAlertViewTests: XCTestCase {
@@ -71,8 +77,8 @@ final class SwiftyAlertViewTests: XCTestCase {
   ///   同一次派发里把第一个的位移抵消,净效果恒为零 → 第一组断言失败。
   /// - **B21**:撤销若退回 `removeObserver(self, name:)`(对 block 形式注册是
   ///   空操作)→ 最后一组断言失败。
-  /// - **注册点**:撤销若仍挂在 viewDidDisappear 上(UIKit 从不调用它),
-  ///   hideView() 就撤不掉任何东西 → 最后一组断言同样失败。
+  /// - **注册点**:撤销必须由 hideView() 驱动。搬回 viewDidDisappear 之后,
+  ///   hideView() 自己就不再撤销任何东西 → 最后一组断言同样失败。
   func testKeyboardAvoidanceFollowsShowHideLifecycle() {
     let alert = makeShowingAlert()
 
@@ -111,9 +117,11 @@ final class SwiftyAlertViewTests: XCTestCase {
 
   /// 注册点不再是外观回调。
   ///
-  /// UIKit 从不为 SwiftyAlertView 调用 viewDidAppear / viewDidDisappear
-  /// (它的 view 是直接 addSubview 到 window 上的),所以任何挂在那里的注册
-  /// 都是死代码。本测试锁定"注册没有回到外观回调上":单独驱动 viewDidAppear
+  /// 注意这条锁定的**不是**"外观回调不触发"——实测它们会触发(见类型注释)。
+  /// 锁定的是"本库不去依赖 UIKit 在这个位置没有契约保证的行为":一个只被裸
+  /// addSubview 到 window 上的控制器,按规则不该收到外观回调,实际却收到了;
+  /// 哪一边将来会变谁也不知道,所以注册/撤销改由本类型自己的展示生命周期
+  /// (showTitle / hideView())驱动。本测试断言:单独驱动 viewDidAppear
   /// 不应让这个 alert 开始响应键盘。
   func testAppearanceCallbacksDoNotDriveKeyboardObservation() {
     let alert = makeAlert()
@@ -123,7 +131,8 @@ final class SwiftyAlertViewTests: XCTestCase {
 
     XCTAssertEqual(
       alert.contentView.frame.origin.y, Self.contentFrame.origin.y, accuracy: 0.5,
-      "viewDidAppear 不应注册键盘观察者 —— UIKit 从不为本控制器调用它,挂在那里等于永不生效")
+      "viewDidAppear 不应注册键盘观察者 —— 键盘观察必须只由 showTitle / hideView() 驱动,"
+        + "不依赖 UIKit 对这种上屏方式的外观回调行为")
     XCTAssertFalse(alert.keyboardHasBeenShown)
   }
 
