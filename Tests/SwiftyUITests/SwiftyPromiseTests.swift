@@ -567,18 +567,18 @@ final class SwiftyPromiseTests: XCTestCase {
     let pool = SwiftyThreadPool()
     pool.stop()
 
-    let secondTaskRan = Locked(false)
-    let received = Locked<Error?>(nil)
+    let secondTaskRan = Box(false)
+    let received = Box<Error?>(nil)
     let settled = XCTestExpectation(description: "chain settles")
 
     let promise = Promise<Int>.firstly(pool: pool, with: "first", on: .background) { (update, _) in
       update(1)
     }.then(on: .background) { (_, _) in
-      secondTaskRan.set(true)
+      secondTaskRan.value = true
     }
 
     promise.catch { error in
-      received.set(error)
+      received.value = error
       settled.fulfill()
     }
 
@@ -588,19 +588,29 @@ final class SwiftyPromiseTests: XCTestCase {
 
     wait(for: [settled], timeout: 20)
     XCTAssertEqual(
-      received.get() as? PromiseError, .cancelled,
+      received.value as? PromiseError, .cancelled,
       "被取消的任务必须让链条以 PromiseError.cancelled 失败")
-    XCTAssertFalse(secondTaskRan.get(), "链条已因取消而终结,后续任务不得执行")
+    XCTAssertFalse(secondTaskRan.value, "链条已因取消而终结,后续任务不得执行")
   }
 
   /// 取消发生在执行**期间**时,工作其实已经完成 —— 不得因此丢弃有效结果。
-  /// 判定条件是 isCancelled && !didRun,不是单看 isCancelled。
   ///
-  /// 这是上一个测试的反面约束,两者共同钉死判定条件的形状:少了 isCancelled
-  /// 上一个测试红,少了 !didRun 这一个红。这里 removeAll() 在任务体**内部**
-  /// 调用,此时本 operation 还在 queue.operations 里(尚未 finish),因此它自己
-  /// 也会被 cancel —— 正是"取消发生在执行期间"这一格。BlockOperation 的块不
-  /// 检查 isCancelled,update(42) 已经完整执行,这份结果不该被丢弃。
+  /// 与上一个测试是对称的一对,各钉住判定的一个方向:上一个钉"取消抢在执行
+  /// 前面 → 链条必须失败",这一个钉"取消输给了执行 → 链条不许失败"。删掉
+  /// fire() 里整个 if 块,上一个红;删掉 `!flag.didRun` 这半个条件,这一个红。
+  ///
+  /// 但有一件事必须说白,免得后来者以为这里的覆盖比实际更严:
+  /// `op?.isCancelled == true` 这半个条件**没有任何测试钉得住**,单独把它删成
+  /// `if !flag.didRun`,整个套件依然全绿。这不是覆盖缺口,而是一个等价变异 ——
+  /// BlockOperation 的执行块只有在被取消时才会不执行,所以在 completionBlock
+  /// 里 `!didRun` 与 `isCancelled && !didRun` 恒等价,没有任何输入能区分两者。
+  /// 保留 isCancelled 的理由是把"我们判的是取消"这个意图写进代码,并且在将来
+  /// 执行块万一多出别的提前返回路径时结论依然成立;它是一条靠人维持的性质,
+  /// 不要指望改动它会有测试报警。
+  ///
+  /// 时序不靠 sleep:removeAll() 在任务体**内部**调用,此时本 operation 还在
+  /// queue.operations 里(尚未 finish),因此必然把正在执行的自己一起 cancel
+  /// —— 确定命中"取消发生在执行期间"这一格。update(42) 已经完整执行。
   func testCancelDuringExecutionDoesNotDiscardCompletedWork() async throws {
     let pool = SwiftyThreadPool()
 
@@ -613,5 +623,65 @@ final class SwiftyPromiseTests: XCTestCase {
 
     let value = try await withTestTimeout { try await promise.value() }
     XCTAssertEqual(value, 42, "取消发生在执行期间时工作已完成,结果不得被丢弃")
+  }
+
+  /// 上一个测试走的是 operationBuildT(两参 `(update, value)` 闭包);这一个走
+  /// **非泛型的 operationBuild**(零参闭包)—— 也就是 README 与 iOSExample 实际
+  /// 演示的那种写法。
+  ///
+  /// 为什么不是重复:两条构建路径各自 new 一个 RunFlag、各自写一句
+  /// `flag.markRun()`,互不相干。只删掉 operationBuild 里的那一句(泛型那条
+  /// 保持不动),在没有本测试时全套 115 个测试照样全绿 —— 而漏掉的正是
+  /// "执行期间被取消 → 已完成的工作被当作取消丢弃"这个缺陷在公开 API 最常见
+  /// 写法上的复现。一对刻意对称的判定,不能只测其中一半的输入路径。
+  ///
+  /// 时序与上一个同理:removeAll() 在任务体内部调用,必然把正在执行的自己一起
+  /// 取消。后面那个 then 是 removeAll() 之后才入队的新 operation,不在被取消之列,
+  /// 它写入的 7 必须能被完整取回 —— 既证明链条没被判成失败,也证明它继续往下走了。
+  func testCancelDuringExecutionOnNonGenericTaskDoesNotDiscardWork() async throws {
+    let pool = SwiftyThreadPool()
+
+    let promise = Promise<Int>.firstly(pool: pool) {
+      pool.removeAll()
+    }.then(on: .background) { (update, _) in
+      update(7)
+    }
+
+    let value = try await withTestTimeout { try await promise.value() }
+    XCTAssertEqual(
+      value, 7,
+      "非泛型任务在执行期间被取消时,链条不得失败,后续任务必须照常执行")
+  }
+
+  /// fire() 的 `.finish` 分支必须把 always 任务投递到**注入的池**上,
+  /// 不能落回 SwiftyThreadPool.default。
+  ///
+  /// `.run` 分支的池路由已经被本节第一个测试钉住了(它若落到 .default,那个测试
+  /// 就取消不到自己的 operation,只能超时变红);`.finish` 分支在本测试之前
+  /// 没有任何覆盖 —— 把它改成 `task.start(on: .default)`,全套 115 个测试全绿。
+  ///
+  /// 这不是洁癖。value() 追加的那个 always operation 走的正是 `.finish` 分支,
+  /// 后续任务要在它上面判定取消;若它其实安静地待在 .default 上、而测试取消的
+  /// 是注入的池,那个测试就会在什么都没验证的情况下通过 —— 本仓库已经有过
+  /// 七个这样的测试,不能再添一个。
+  ///
+  /// 判据不涉及任何时序:正在执行的 operation 尚未 finish,仍留在
+  /// queue.operations 里,因此它必然能在自己所属的那个池里按 identifier 找到自己。
+  func testAlwaysTasksAreDispatchedToInjectedPool() {
+    let pool = SwiftyThreadPool()
+    let foundItselfInInjectedPool = Box<Bool?>(nil)
+    let done = expectation(description: "always 执行")
+
+    Promise<Void>.firstly(pool: pool) {
+      // 主体不做事,只为把链条推到 .finish 分支
+    }.always(with: "always-op") {
+      foundItselfInInjectedPool.value = pool.operation(withIdentifier: "always-op") != nil
+      done.fulfill()
+    }.start()
+
+    wait(for: [done], timeout: 20)
+    XCTAssertEqual(
+      foundItselfInInjectedPool.value, true,
+      "always 任务必须投递到注入的池上,不能落回 SwiftyThreadPool.default")
   }
 }

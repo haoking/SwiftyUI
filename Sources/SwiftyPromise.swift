@@ -116,6 +116,11 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
   /// internal 且默认是共享单例:公开 API 完全看不到这个参数,行为与 2.0 一致。
   /// 它存在的唯一理由是测试 —— 取消语义必须在一个与其他测试隔离的池上验证,
   /// 否则要么去挂起进程级单例(污染别的测试),要么测试根本碰不到被测的那条链。
+  ///
+  /// 这是一个强引用:Promise 活着,它注入的池(以及池在 init 里注册的那个
+  /// 内存告警观察者)就一直活着。走公开 API 时指向的是进程级单例,本来就与
+  /// 进程同寿,无所谓;注入自定义池时才有区别 —— 尤其是在 value() 文档里
+  /// 记的那种"链条永远无法终结"的情形下,整条链连同这个池一起泄漏。
   internal let pool: SwiftyThreadPool
 
   private var tasks: [PromiseTask] = []
@@ -181,8 +186,14 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
     // 这里不持有 self:链条运行期间的强引用由 fire() 在投递时挂到
     // operation 的 completionBlock 上,详见 fire()
     let op = BlockOperation { [weak self] in
-      // 必须是块内第一句:哪怕 self 已经没了,"这个块运行过"也是事实,
-      // 否则 completionBlock 会把它误判为取消。
+      // 放在块内第一句是防御性的,不是纠正性的:这里 self 其实不可能为 nil
+      // (fire() 在 start(on:) 之前就把强引用 self 的 completionBlock 挂了
+      // 上去,而在投递之前这个 op 只能从 self.tasks 够到),因此没有任何测试
+      // 能钉住这个顺序 —— 这是预期,不是覆盖缺口。
+      // 之所以仍然放在最前面:"这个块运行过"是与 self 生死无关的事实,让
+      // markRun 不依赖上面那层不太显眼的可达性论证,将来谁改动 self 的持有
+      // 方式也不会把它连带弄坏。一旦漏掉,completionBlock 会把跑过的块误判
+      // 为取消,丢弃一份有效结果。
       flag.markRun()
       guard let self = self else { return }
       do {
@@ -496,8 +507,13 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
     switch next {
     case .run(let task):
       // 已投递的 operation 是链条运行期间对 self 的唯一强引用:调用方不持有
-      // Promise 时链条也能跑完。它不构成循环引用——task 在上面的临界区里已被
-      // 移出 tasks,operation 完成后由队列释放,强引用随之解除。
+      // Promise 时链条也能跑完。
+      //
+      // 它确实构成一个环,但是瞬态的:self → pool → queue → op →
+      // completionBlock → self。之所以不泄漏,理由与下面这句原本就写着的一样
+      // ——task 在上面的临界区里已被移出 tasks,operation 完成后由队列释放,
+      // 环随之断开。(2.0 时 pool 还是直接取的单例,self 够不到 op,那时确实
+      // 连环都不成环;注入 pool 之后这条边才出现,结论不变,写清楚免得误导。)
       //
       // 只捕获 flag,**不要**捕获 task:task 持有 op,把它捕进 op 自己的
       // completionBlock 会造成 op → completionBlock → task → op 的环 ——
