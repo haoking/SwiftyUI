@@ -246,4 +246,39 @@ extension SwiftyColorTests {
       bg.redValue, 0.5,
       "背景色若仍是纯白,说明那行又变回了整数除法,0.3 的阈值形同虚设(B12)")
   }
+
+  // MARK: - async 变体
+
+  /// colors() 的 async 变体把四个颜色送了出来。
+  ///
+  /// 具体取值由既有的同步版本测试覆盖(testImageColors…),这里验证的是
+  /// async 桥接本身:能返回、不抛错、四个分量都在。
+  func testAsyncColorsReturnsFourColors() async throws {
+    let image = TestSupport.makeEdgeDiscriminatingImage(
+      majorityEdge: UIColor(red: 0, green: 0, blue: 0.55, alpha: 1),
+      minorityEdge: UIColor(red: 0.55, green: 0, blue: 0, alpha: 1),
+      body: UIColor(red: 1, green: 1, blue: 0.6, alpha: 1)
+    )
+    let result = try await withTestTimeout { try await image.colors() }
+
+    // 与同步版本对同一张图的结论一致 —— 这一条才让测试有判别力:
+    // 若 async 变体把颜色顺序搞错了,这里会红。
+    //
+    // 用 Box(TestSupport.swift 里既有的线程安全单值容器)取代原计划里的
+    // Locked——本仓库测试目标里从未存在过 Locked 这个类型,Box 做的是同一件
+    // 事(供异步回调安全地写回一个值),没有理由并存两个同构的帮助类型。
+    let expected = Box<(UIColor, UIColor, UIColor, UIColor)?>(nil)
+    let done = XCTestExpectation(description: "sync colors")
+    image.colors { bg, p, s, d in
+      expected.value = (bg, p, s, d)
+      done.fulfill()
+    }
+    await fulfillment(of: [done], timeout: 20)
+
+    let sync = try XCTUnwrap(expected.value)
+    XCTAssertEqual(result.background, sync.0, "async 变体的 background 必须与同步版本一致")
+    XCTAssertEqual(result.primary, sync.1, "async 变体的 primary 必须与同步版本一致")
+    XCTAssertEqual(result.secondary, sync.2, "async 变体的 secondary 必须与同步版本一致")
+    XCTAssertEqual(result.detail, sync.3, "async 变体的 detail 必须与同步版本一致")
+  }
 }

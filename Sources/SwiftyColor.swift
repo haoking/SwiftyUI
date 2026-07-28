@@ -120,6 +120,10 @@ extension UIImage {
   /// ```
   ///
   /// 另标 `@Sendable`:闭包本身要从调用线程投递到取色链条上再传回主队列。
+  ///
+  /// - Important: 取色链条出错或被取消时(例如 SwiftyThreadPool 收到内存
+  ///   告警调用 removeAll()),`complete` **不会被调用**,且没有任何信号。
+  ///   需要确定性回调的调用方请改用 `colors() async throws`。
   public final func colors(
     _ complete: (
       @MainActor @Sendable (
@@ -144,6 +148,40 @@ extension UIImage {
         }
       }
     }.catch()
+  }
+
+  /// 在后台线程分析图片主色,以 async/await 取回。
+  ///
+  /// 与回调版 `colors(_:)` 的区别只在错误处理:回调版以无参 `.catch()` 收尾,
+  /// 链条出错或被取消时回调**不会被调用**,调用方拿不到任何信号,转圈的 UI
+  /// 会一直转;本方法则把错误抛出来。
+  ///
+  /// ```swift
+  /// do {
+  ///   let (bg, _, _, _) = try await image.colors()
+  ///   view.backgroundColor = bg
+  /// } catch {
+  ///   view.backgroundColor = .systemBackground
+  /// }
+  /// ```
+  ///
+  /// - Throws: `PromiseError.cancelled` —— 取色链条被取消(最常见的来源是
+  ///   SwiftyThreadPool 收到内存告警调用 removeAll())。
+  /// - Throws: `PromiseError.noValue` —— 链条终结但没有产出值。正常情况下
+  ///   不会发生;它对应 self 在分析开始前就被释放这一理论情形。
+  public final func colors() async throws -> (
+    background: UIColor, primary: UIColor, secondary: UIColor, detail: UIColor
+  ) {
+    let promise = Promise<(UIColor, UIColor, UIColor, UIColor)>.firstly { [weak self] (update, _) in
+      guard let strongSelf = self else { return }
+      update(strongSelf.getColors())
+    }
+    guard let colors = try await promise.value() else {
+      // value() 返回 nil 意味着没有任务调用过 update(...),在这里只可能是
+      // 上面那个 weak self 守卫失败。不强解包 —— B1/B19 都是这么来的。
+      throw PromiseError.noValue
+    }
+    return (colors.0, colors.1, colors.2, colors.3)
   }
 
   private final class CountedColor {
