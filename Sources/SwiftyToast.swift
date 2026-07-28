@@ -26,7 +26,11 @@ public final class SwiftyToast {
   /// 一个不可变的 String 常量本来也没有任何需要主 actor 保护的可变状态。
   public nonisolated static let accessibilityIdentifier: String = "SwiftyToast"
 
-  private lazy var toastLabel: SwiftyLabel = { [unowned self] in
+  /// internal 而非 private:单元测试要能断言"构造 toast 不算帧"
+  /// (见 SwiftyToastTests.testGeometryIsNotComputedAtConstructionTime)。
+  /// 这个视图没有别的可观察出口 —— 它既不属于任何 view controller,
+  /// 也不在 show() 之前挂上任何 superview。对外仍不可见。
+  lazy var toastLabel: SwiftyLabel = { [unowned self] in
     var toastLabel = SwiftyLabel(nil, .white, .init(white: 0.0, alpha: 0.7))
     toastLabel.layer.cornerRadius = 5
     toastLabel.clipsToBounds = true
@@ -37,6 +41,15 @@ public final class SwiftyToast {
     toastLabel.isAccessibilityElement = true
     toastLabel.accessibilityTraits = .staticText
     toastLabel.accessibilityIdentifier = Self.accessibilityIdentifier
+    // 已经挂在屏幕上的 toast 也要跟着旋转走。窗口 bounds 一变,autoresizing
+    // 就按这份 mask 重新分配边距:宽度差由左右两条**同样大**的柔性边距平分
+    // (于是保持水平居中),高度差全部由柔性上边距吸收(于是底边距不变)。
+    // 没有这一行,3.5s 停留期间转屏的 toast 会原地不动,横屏下直接落到屏幕外。
+    //
+    // 已知的小偏差:竖屏底边距 30、横屏 20,autoresizing 保的是"不变",
+    // 所以旋转过来的那一个会保持 30。对一个 3.5s 后就消失的提示,
+    // 这点差别不值得为它引入一套 layout 回调。
+    toastLabel.autoresizingMask = [.flexibleTopMargin, .flexibleLeftMargin, .flexibleRightMargin]
     return toastLabel
   }()
 
@@ -48,7 +61,9 @@ public final class SwiftyToast {
   ///   UILabel、并发修改队列状态)。2.0 起本类型是 @MainActor 隔离的,
   ///   该约束由编译器静态强制——从非隔离上下文调用会直接编译失败。
   public init(_ text: String) {
-    layoutView(text: text)
+    // 只配置文本,**不算帧**:帧要等到 show() 真正拿到窗口时再算,理由见 layoutView。
+    toastLabel.text = text
+    toastLabel.accessibilityLabel = text
     SwiftyToastCenter.default.add(self).fire()
   }
 
@@ -58,13 +73,26 @@ public final class SwiftyToast {
   //        return .init(text: text)
   //    }
 
-  private func layoutView(text: String) {
-    toastLabel.text = text
-    toastLabel.accessibilityLabel = text
-
-    let window = SwiftyGlobal.keyWindow
-    let containerSize: CGSize = window?.bounds.size ?? .zero
-    let isPortrait: Bool = window?.windowScene?.interfaceOrientation.isPortrait ?? true
+  /// 按**显示这一刻**的窗口几何算出 toast 的位置与大小。
+  ///
+  /// 必须在 show() 里算,不能在 init 里算。SwiftyToastCenter 是串行队列,
+  /// 一个 toast 要播满 0.5 + 2.5 + 0.5 ≈ 3.5s,在这期间创建的 toast 只是排队,
+  /// 要等前面播完才轮到 show()。构造时算好的帧到那时早已过期,两种情形都精确
+  /// 复现 B22 的症状:
+  ///
+  /// 1. **排队期间转屏** —— 该 toast 会以旋转前的几何显示。竖屏 402×874 转成
+  ///    横屏 874×402 后,y ≈ 874 − 27 − 30 = 817,而窗口只有 402 高:整块在
+  ///    屏幕外,用户什么也看不到。示例 App 里任意两次间隔 ≥1s 的点击就会排队
+  ///    第二个 toast,触发门槛很低。
+  /// 2. **构造时还没有 key window** —— containerSize 退化为 .zero,x 与 y 都是
+  ///    负数;等到 show() 执行时窗口若已进入前台活跃,toast 就被挂在负坐标上。
+  ///    启动期间(scene 还是 .foregroundInactive)可达。
+  ///
+  /// 挪到 show() 的 `guard let window` 之后,一处修复同时解掉这两面,
+  /// 而且窗口一定存在 —— 原来那句 `?? .zero` 的退化分支自然消失了。
+  private func layoutView(in window: UIWindow) {
+    let containerSize: CGSize = window.bounds.size
+    let isPortrait: Bool = window.windowScene?.interfaceOrientation.isPortrait ?? true
     let constraintSize: CGSize = CGSize(
       width: containerSize.width * (280.0 / 320.0), height: CGFloat.greatestFiniteMagnitude)
     let fitSize: CGSize = toastLabel.sizeThatFits(constraintSize)
@@ -99,6 +127,8 @@ public final class SwiftyToast {
         SwiftyToastCenter.default.finish()
         return
       }
+      // 帧在这里算,不在 init 里算 —— 见 layoutView(in:) 的说明(B22)。
+      self.layoutView(in: window)
       self.toastLabel.alpha = 0
       window.addSubview(self.toastLabel)
 
