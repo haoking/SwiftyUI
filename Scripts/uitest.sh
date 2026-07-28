@@ -16,13 +16,33 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# 动态解析一台可用的 iPhone 模拟器。
+# 解析一台可用的 iPhone 模拟器。
+#
 # 不能写 name=iPhone 16 Pro:同名设备存在 arm64 与 x86_64 两条记录,xcodebuild 会因歧义失败。
-UDID="$(xcrun simctl list devices available | awk -F'[()]' '/    iPhone/ {print $2}' | tail -1)"
+# 但也不能只取 tail -1:选中哪台取决于本机装了什么以及 simctl 的列出顺序,
+# 而取色测试对屏幕 scale 敏感、几何断言对窗口尺寸敏感 —— 换台机器就可能
+# 出现无法复现的失败。因此优先钉住一个机型,缺失时才回落。
+PREFERRED_DEVICE="${SWIFTYUI_SIMULATOR:-iPhone 17}"
+DEVICES="$(xcrun simctl list devices available)"
+
+# 精确匹配设备名(逐字比较,不是正则):行形如 "    iPhone 17 (UDID) (Booted)"
+UDID="$(printf '%s\n' "$DEVICES" | awk -F' \\(' -v want="$PREFERRED_DEVICE" '
+  { name=$1; gsub(/^ +/, "", name); if (name == want) { split($2, a, ")"); print a[1]; exit } }')"
+
+if [ -z "$UDID" ]; then
+  echo "提示:未找到 \"$PREFERRED_DEVICE\",回落到任意可用 iPhone。" >&2
+  echo "     可用 SWIFTYUI_SIMULATOR 指定机型。" >&2
+  UDID="$(printf '%s\n' "$DEVICES" | awk -F'[()]' '/    iPhone/ {print $2}' | tail -1)"
+fi
+
 if [ -z "$UDID" ]; then
   echo "错误:找不到可用的 iPhone 模拟器" >&2
   exit 1
 fi
+
+# 把实际选中的设备打进日志 —— 失败无法复现时,第一件要知道的事就是当时跑在哪台上。
+DEVICE_NAME="$(printf '%s\n' "$DEVICES" | grep -F "$UDID" | head -1 | sed -E 's/^ *(.*) \([0-9A-F-]+\).*$/\1/')"
+echo "使用模拟器:${DEVICE_NAME:-未知} ($UDID)"
 
 # 键盘避让用例需要**软件键盘真的出现在屏幕内**。
 #
