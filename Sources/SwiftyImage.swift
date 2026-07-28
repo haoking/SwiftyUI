@@ -139,6 +139,13 @@ extension UIImage {
   public final func rounded(
     withCornerRadius radius: CGFloat, divideRadiusByImageScale: Bool = false
   ) -> UIImage {
+    // 与上面三个 reSize 方法同一条守卫:尺寸为零时
+    // UIGraphicsBeginImageContextWithOptions 根本不会创建 context,随后
+    // UIGraphicsGetImageFromCurrentImageContext() 返回 nil —— 原来这里是强解包,
+    // `UIImage().rounded(withCornerRadius: 5)` 直接 trap。同一个文件、同一种风险,
+    // 守了三次、漏了两次。
+    guard size.width > 0 && size.height > 0 else { return self }
+
     UIGraphicsBeginImageContextWithOptions(size, false, 0.0)
 
     let scaledRadius = divideRadiusByImageScale ? radius / scale : radius
@@ -149,13 +156,16 @@ extension UIImage {
 
     draw(in: CGRect(origin: CGPoint.zero, size: size))
 
-    let roundedImage = UIGraphicsGetImageFromCurrentImageContext()!
+    let roundedImage = UIGraphicsGetImageFromCurrentImageContext() ?? self
     UIGraphicsEndImageContext()
 
     return roundedImage
   }
 
   public final func roundedIntoCircle() -> UIImage {
+    // 同 rounded(withCornerRadius:):零尺寸时不会有 context,取图返回 nil
+    guard size.width > 0 && size.height > 0 else { return self }
+
     let radius = min(size.width, size.height) / 2.0
     var squareImage = self
     if size.width != size.height {
@@ -169,7 +179,7 @@ extension UIImage {
       roundedRect: CGRect(origin: CGPoint.zero, size: squareImage.size), cornerRadius: radius)
     clippingPath.addClip()
     squareImage.draw(in: CGRect(origin: CGPoint.zero, size: squareImage.size))
-    let roundedImage = UIGraphicsGetImageFromCurrentImageContext()!
+    let roundedImage = UIGraphicsGetImageFromCurrentImageContext() ?? self
     UIGraphicsEndImageContext()
 
     return roundedImage

@@ -67,6 +67,12 @@ public enum SwiftyUI {
   /// 因此会影响整个 App,包括你没有使用 SwiftyUI 的部分。
   /// 默认不启用;需要这项收益的调用方显式开启并自行承担风险。
   ///
+  /// - Warning: **不可撤销**。方法交换作用在 UIView 这个类对象上,是进程级的,
+  ///   一旦开启就没有任何接口能还原(本类型也刻意不提供 disable —— 再交换一次
+  ///   并不能保证回到原状:期间若有别的库也 swizzle 了同一对 setter,二次交换
+  ///   会把它们的实现一起搅乱)。因此适合在 App 启动时一次性决定,不适合按
+  ///   场景开关,更不适合在单元测试里调用 —— 它会污染同进程内此后所有的测试。
+  ///
   /// 重复调用无效果。必须在主线程调用。
   public static func enableGlobalOpaqueOptimization() {
     guard !didEnableGlobalOpaqueOptimization else { return }

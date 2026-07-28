@@ -48,6 +48,13 @@ final class SwiftyViewTests: XCTestCase {
   /// 判别力的关键是用**半透明**背景色:UIView 的 isOpaque 系统默认为 true
   /// 且不随 backgroundColor 变化。若全局 swizzle 被意外装上,它会被重算为 false。
   /// 用不透明色(如 .red)则无判别力 —— 那种情况下重算结果同样是 true。
+  ///
+  /// - Important: 本测试今天能过,前提是**整个测试进程里没有任何人调用过**
+  ///   `SwiftyUI.enableGlobalOpaqueOptimization()`。那个方法对 UIView 做的是
+  ///   进程级、**不可撤销**的方法交换(见它自己的文档),没有任何 tearDown 能
+  ///   把它还原。所以:不要在任何测试里调用它 —— 一旦调用,不只是本测试,
+  ///   同进程内此后所有依赖"UIView 默认行为"的测试都会跟着失真,而且改动本身
+  ///   在 diff 里看起来完全无害。要覆盖开启后的行为,只能另起一个测试进程。
   func testPlainUIViewIsUnaffectedByDefault() {
     let plain = UIView()
     plain.backgroundColor = UIColor.red.withAlphaComponent(0.5)

@@ -48,6 +48,28 @@ final class SwiftyImageTests: XCTestCase {
       "非正方形输入应先裁成正方形")
   }
 
+  /// 零尺寸输入不应崩溃。
+  ///
+  /// `UIImage()` 的 size 是 .zero,此时 UIGraphicsBeginImageContextWithOptions
+  /// 根本不会创建 context,UIGraphicsGetImageFromCurrentImageContext() 返回 nil。
+  /// 这两个方法原本对它强解包,而同文件里三个兄弟 reSize 方法都先做了尺寸守卫
+  /// (testResizeWithZeroSizeReturnsSelf 覆盖的就是那三个)。
+  ///
+  /// 判别力:去掉守卫或把 `?? self` 改回 `!`,本测试会让测试进程直接 crash。
+  func testRoundedWithZeroSizeReturnsSelfWithoutCrashing() {
+    let empty = UIImage()
+    XCTAssertEqual(empty.size, .zero, "前提:UIImage() 的尺寸为零,否则本测试无判别力")
+
+    XCTAssertEqual(
+      empty.rounded(withCornerRadius: 5).size, .zero,
+      "零尺寸时 rounded(withCornerRadius:) 应原样返回,不应 trap")
+    XCTAssertEqual(
+      empty.rounded(withCornerRadius: 5, divideRadiusByImageScale: true).size, .zero)
+    XCTAssertEqual(
+      empty.roundedIntoCircle().size, .zero,
+      "零尺寸时 roundedIntoCircle() 应原样返回,不应 trap")
+  }
+
   // MARK: - opaque 判定
 
   func testOpaqueDetection() {
