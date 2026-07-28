@@ -452,18 +452,20 @@ final class SwiftyPromiseTests: XCTestCase {
     XCTAssertEqual(second, "once")
   }
 
-  // MARK: - value() 与已注册的 catch 处理器
+  // MARK: - value() 与 catch(_:) 互不干扰(两种顺序都要成立)
 
+  /// **顺序一:先 catch,再 value()。**
+  ///
   /// `catch(_:)` 是替换语义;value() 曾经内部转手调用它,于是
   /// `p.catch { showError($0) }` 之后再 `try await p.value()`,showError 被静默
   /// 丢弃 —— 用户明明登记过错误处理器,却再也收不到错误。
   ///
-  /// 判别力:把 value() 里的 addErrorHandler 改回 self.catch,最后那条断言
-  /// (先注册的处理器也必须收到错误)必然失败。头一段 do/catch 仍会通过,
+  /// 判别力:把 value() 里的 addInternalErrorHandler 改回 self.catch,最后那条
+  /// 断言(先注册的处理器也必须收到错误)必然失败。头一段 do/catch 仍会通过,
   /// 因为 value() 自己的处理器活了下来 —— 这正是这个缺陷"静默"的地方。
   ///
   /// 首个任务故意慢 0.3 秒:必须让 value() 在链条**仍在飞行中**时登记处理器,
-  /// 才会走到组合这条路径;链条若已终结,value() 走的是另一条(立即返回)分支。
+  /// 才会走到这条路径;链条若已终结,value() 走的是另一条(立即返回)分支。
   func testAsyncValuePreservesPreviouslyRegisteredCatchHandler() async throws {
     let caughtByCatch = Box(false)
     let promise = Promise<String>.firstly(on: .background) { _, _ in
@@ -500,7 +502,47 @@ final class SwiftyPromiseTests: XCTestCase {
       // 期望路径
     }
 
-    // markError 只会调用一次 errorBlock,组合闭包因此各调一次
+    // markError 只会各调用一次两个槽位的处理器
     XCTAssertEqual(catchCallCount.value, 1, "先注册的处理器应恰好被调用一次")
+  }
+
+  /// **顺序二:先 value(),再 catch。**
+  ///
+  /// 上一个测试的镜像。`catch(_:)` 的替换语义若把 value() 装上的处理器顶掉,
+  /// 链条出错时就没有人拿着那个错误去恢复 continuation;随后 fire() 走到
+  /// .finish 分支,value() 挂上的那个 always 任务照样执行,于是这个 await
+  /// **以 nil 正常返回,错误被整个吞掉** —— 不是挂死(实测确认,见报告)。
+  /// 与顺序一是同一类静默丢失,只是丢的东西反过来:那边丢的是调用方的处理器,
+  /// 这边丢的是错误本身,而后者连"出过错"都看不出来。
+  ///
+  /// 判别力(已实测):把 value() 里的处理器写回调用方的 errorBlock 槽位
+  /// (无论是 `self.catch { ... }` 还是往 errorBlock 上追加),下面的
+  /// `XCTFail("应当抛出链条中的错误")` 都会触发。
+  ///
+  /// 顺序控制:`value()` 在挂起**之前**就同步登记好自己的处理器
+  /// (withCheckedThrowingContinuation 的闭包体是同步执行的),因此
+  /// async let 起飞后等 0.2 秒再调 catch,足以保证"value 先、catch 后";
+  /// 链条本身要 0.5 秒才抛错,两者都赶在它之前。
+  func testCatchAfterValueReachesBothHandlers() async throws {
+    let caughtByCatch = Box(false)
+    let promise = Promise<String>.firstly(on: .background) { _, _ in
+      Thread.sleep(forTimeInterval: 0.5)
+      throw TestError()
+    }
+
+    async let awaited: String? = withTestTimeout { try await promise.value() }
+    try await Task.sleep(nanoseconds: 200_000_000)
+    promise.catch { _ in caughtByCatch.value = true }
+
+    do {
+      _ = try await awaited
+      XCTFail("应当抛出链条中的错误")
+    } catch is TestError {
+      // 期望路径:value() 自己的处理器没有被 catch(_:) 顶掉
+    }
+
+    XCTAssertTrue(
+      caughtByCatch.value,
+      "value() 之后登记的 catch 处理器也必须收到错误")
   }
 }

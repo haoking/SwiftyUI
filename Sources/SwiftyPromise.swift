@@ -62,7 +62,21 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
 
   private var tasks: [PromiseTask] = []
   private var alwaysTasks: [PromiseTask] = []
+  /// 调用方经 `catch(_:)` 登记的错误处理器。替换语义,由调用方独占。
   private var errorBlock: (@Sendable (Error) -> Void)?
+  /// 库内部自己的错误处理器,与 `errorBlock` **完全分开的一个槽位**。
+  ///
+  /// 目前唯一的使用者是 `value()`:它需要在出错时恢复自己的 continuation。
+  /// 两个槽位分开,是为了让调用方的 `catch(_:)` 与库内部的 `value()` 互不干扰
+  /// —— 无论两者以什么顺序被调用:
+  ///
+  /// - `catch(_:)` 之后 `value()`:value() 不去碰 errorBlock,调用方登记的处理器
+  ///   完好无损(它曾经被 value() 内部转手调用 catch(_:) 静默覆盖掉)。
+  /// - `value()` 之后 `catch(_:)`:catch(_:) 只写 errorBlock,碰不到这个槽位,
+  ///   value() 的 continuation 仍然会被恢复(否则那个 await 永远挂起)。
+  ///
+  /// 因此 `catch(_:)` 的公开语义(替换)一个字都不用改。
+  private var internalErrorHandler: (@Sendable (Error) -> Void)?
   private var isError: Bool = false
   private var isStarted: Bool = false
   private var isFinished: Bool = false
@@ -79,11 +93,17 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
     // 也正因为在临界区外,它跑在"出错的那个 operation 所在的线程"上
     // (.background 时是 SwiftyThreadPool,.main 时是 OperationQueue.main),
     // 所以 errorBlock 必须是 @Sendable 的 —— 详见 catch(_:) 的说明。
-    let handler: (@Sendable (Error) -> Void)? = withState {
-      self.isError = true
-      return self.errorBlock
-    }
-    handler?(error)
+    let handlers: (user: (@Sendable (Error) -> Void)?, internal: (@Sendable (Error) -> Void)?) =
+      withState {
+        self.isError = true
+        return (self.errorBlock, self.internalErrorHandler)
+      }
+    // 顺序有意义:先调用方的,再库内部的。内部那个(value() 的)会恢复
+    // continuation,一旦恢复,await 处的代码就可能立刻继续往下跑;先跑调用方的
+    // 处理器,才能保证 `await value()` 返回时它已经执行完毕,而不是留下一个
+    // 由调度决定输赢的竞争。
+    handlers.user?(error)
+    handlers.internal?(error)
   }
 
   private func update(_ newValue: T?) {
@@ -203,31 +223,31 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
   ///   而调用点是同步的、不跨隔离,编译器无从察觉。要在错误处理里碰 UI,
   ///   请自行跳回主 actor。
   /// - Important: 本方法是**替换**语义 —— 它登记的是"这条链的错误处理器",
-  ///   重复调用后者覆盖前者,传 nil 则清空。库内部需要在不破坏调用方已登记
-  ///   处理器的前提下加挂自己的处理器时,走 addErrorHandler(_:) 而不是这里。
+  ///   重复调用后者覆盖前者,传 nil 则清空。这条语义是公开契约,不要改动。
+  ///   它只写 `errorBlock` 这一个槽位,库内部的处理器在
+  ///   `internalErrorHandler` 里,两者互不影响;因此 `catch(_:)` 与 `value()`
+  ///   无论谁先谁后,都不会破坏对方(见 internalErrorHandler 的说明)。
   public func `catch`(_ errorBlock: (@Sendable (Error) -> Void)? = nil) {
     withState { self.errorBlock = errorBlock }
     beginIfNeeded()
   }
 
-  /// 追加一个错误处理器,而不是替换已有的那个。出错时按注册顺序全部调用。
+  /// 往库内部那个槽位上加挂一个错误处理器。绝不触碰调用方的 `errorBlock`。
   ///
-  /// `catch(_:)` 是替换语义,库内部不能拿它当"加挂"用:调用方完全可能先
-  /// `p.catch { showError($0) }` 再 `try await p.value()`,若 value() 内部转手调
-  /// 一次 catch(_:),那个已经登记过的处理器就被静默丢弃了 —— 而 value() 的
-  /// 另一条(已终结)分支恰恰在注释里明确拒绝调用 catch(_:),给出的理由
-  /// 就是"会把已经注册过的 errorBlock 覆盖掉"。
+  /// 内部槽位自己是**追加**语义:同一个 Promise 上可能有多个并发的 `value()`
+  /// 调用,各自持有一个只能恢复一次的 continuation。若这里写成替换,后一次
+  /// 调用会把前一次的处理器顶掉,前一个 await 就永远挂在那里了。
   ///
   /// 读旧值与写组合值必须在同一个临界区内完成:先读后写会让两个并发的追加
   /// 互相覆盖,只是把竞争窗口缩小而不是消除 —— 与 appendAlwaysIfUnfinished
   /// 同一条理由。
-  private func addErrorHandler(_ handler: @escaping @Sendable (Error) -> Void) {
+  private func addInternalErrorHandler(_ handler: @escaping @Sendable (Error) -> Void) {
     withState {
-      guard let existing = self.errorBlock else {
-        self.errorBlock = handler
+      guard let existing = self.internalErrorHandler else {
+        self.internalErrorHandler = handler
         return
       }
-      self.errorBlock = { error in
+      self.internalErrorHandler = { error in
         existing(error)
         handler(error)
       }
@@ -290,9 +310,8 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
       // 之间把 alwaysTasks 排空,让这次追加白追加。
       guard appendAlwaysIfUnfinished(.create(nil, .background, alwaysOperation)) else {
         // 链条已经终结:上面这个 always 任务永远不会被 fire() 排空到,
-        // 也就永远不会执行。立即以当前值恢复,不再调用 catch(_:)——
-        // 那会把已经注册过的 errorBlock 覆盖掉,而链条已经终结,不会再
-        // 产生新的错误,调用也没有意义。
+        // 也就永远不会执行。立即以当前值恢复,也不必登记任何错误处理器 ——
+        // 链条已经终结,不会再产生新的错误。
         guard resumed.claim() else { return }
         continuation.resume(returning: self.currentValue)
         return
@@ -302,13 +321,16 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
       // 链条已经被别的终结符启动、正在飞行中——两种情况下追加都是正确
       // 的,fire() 迟早会走到 .finish 并排空 alwaysTasks。
       //
-      // 这里走 addErrorHandler 而不是 catch(_:):后者是替换语义,会把调用方
-      // 在 value() 之前登记的错误处理器整个丢掉(`p.catch { showError($0) }`
-      // 之后再 `try await p.value()`,showError 就再也收不到错误了)。
-      // 上面那条已终结分支拒绝调用 catch(_:) 用的正是同一条理由。
-      // catch(_:) 顺带做的 beginIfNeeded() 在下面显式补上:它经同一把 isStarted
-      // 门闩判断是否真的需要启动,已经在飞行中时不会二次推进链条。
-      self.addErrorHandler { error in
+      // 登记在**库内部那个槽位**上,而不是调用方的 errorBlock 上。
+      // 这样两个方向都成立,与 catch(_:) 的调用顺序无关:
+      //   catch 在前 —— 调用方登记的处理器不会被这里覆盖;
+      //   catch 在后 —— catch(_:) 只写 errorBlock,覆盖不掉下面这个处理器,
+      //                 这个 await 因此不会被别人的一句 catch 挂死。
+      // 曾经这里是 `self.catch { ... }`,两个方向都会坏掉一个。
+      //
+      // beginIfNeeded() 显式补上(以前由 catch(_:) 顺带完成):它经同一把
+      // isStarted 门闩判断是否真的需要启动,已经在飞行中时不会二次推进链条。
+      self.addInternalErrorHandler { error in
         guard resumed.claim() else { return }
         continuation.resume(throwing: error)
       }
