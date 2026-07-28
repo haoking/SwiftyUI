@@ -17,9 +17,18 @@ cd "$(dirname "$0")/.."
 PREFERRED_DEVICE="${SWIFTYUI_SIMULATOR:-iPhone 17}"
 DEVICES="$(xcrun simctl list devices available)"
 
-# 精确匹配设备名(逐字比较,不是正则):行形如 "    iPhone 17 (UDID) (Booted)"
-UDID="$(printf '%s\n' "$DEVICES" | awk -F' \\(' -v want="$PREFERRED_DEVICE" '
-  { name=$1; gsub(/^ +/, "", name); if (name == want) { split($2, a, ")"); print a[1]; exit } }')"
+# 精确匹配设备名(逐字比较,不是正则):行形如 "    iPhone 17 (UDID) (Booted)"。
+# 字段分隔符用 [()] 而非转义括号:后者(如 ' \(')在某些 awk 实现上会报
+# "illegal primary in regular expression"——在 pipefail 下直接崩、零输出。
+# [()] 不需要转义,$1 是设备名(可能带尾随空格),$2 就是 UDID,不必再 split。
+#
+# awk 里不提前 exit:提前退出会在没读完 $DEVICES 时关闭管道读端,上游 printf
+# 可能因此收到 SIGPIPE,pipefail 下这条 UDID=$(...) 赋值就会以非零状态阵亡且
+# 零输出。本仓库在 CI 的 Xcode 选择步骤已经踩过同一个模式(见
+# .github/workflows/ci.yml),这里改成让 awk 读完全部输入、把候选交给
+# tail -1 去挑,顺带也和下面回落那行的取法(同名重复时取最后一条)保持一致。
+UDID="$(printf '%s\n' "$DEVICES" | awk -F'[()]' -v want="$PREFERRED_DEVICE" '
+  { name=$1; gsub(/^ +/, "", name); gsub(/ +$/, "", name); if (name == want) print $2 }' | tail -1)"
 
 if [ -z "$UDID" ]; then
   echo "提示:未找到 \"$PREFERRED_DEVICE\",回落到任意可用 iPhone。" >&2
