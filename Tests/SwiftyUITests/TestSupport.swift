@@ -63,6 +63,77 @@ enum TestSupport {
   }
 }
 
+/// 被等待的操作在限定时间内没有返回。
+struct TestTimeoutError: Error, CustomStringConvertible {
+  let seconds: Double
+  var description: String { "操作在 \(seconds) 秒内未返回(疑似挂死)" }
+}
+
+/// 给一段 async 操作加超时:超时就抛错让测试变红,而不是把测试进程挂死。
+///
+/// 为什么需要它:`XCTestExpectation` + `wait(for:timeout:)` 只护得住同步测试;
+/// async 测试里的 `await` 没有任何内建时限。而 `Promise.value()` 在链条无法
+/// 终结时**永不返回、且不响应 Task 取消**(见 Sources/SwiftyPromise.swift 中
+/// value() 的文档),所以这一类回归的失败模式是挂死而不是失败——挂死时唯一的
+/// 兜底是 CI 的 job 级 timeout,而 Scripts/test.sh 只在 xcodebuild 退出**之后**
+/// 才去 grep 日志,被杀掉时不产生任何诊断信息。
+///
+/// 为什么不用 `withThrowingTaskGroup` + 一个 sleep 子任务:task group 在闭包
+/// 返回前会隐式等待**全部**子任务结束,而这里要防的恰恰是"body 永远不返回"
+/// ——那样 group 自己就先挂住了,`cancelAll()` 也救不回来(同上:不响应取消)。
+///
+/// 因此改用两个 detached task 抢一个只能恢复一次的 continuation:谁先到谁胜出。
+/// 超时分支恢复之后本函数立即返回,挂住的那个任务被留在原地——它不是本函数的
+/// 子任务,不会阻塞返回,随测试进程退出而消失。
+///
+/// 为什么不用 `XCTestCase.executionTimeAllowance`:它只有在测试计划里开启
+/// "Test Timeouts"(或给 xcodebuild 传 -test-timeouts-enabled)之后才生效,
+/// 需要改动 Scripts/test.sh 与 CI 配置才能起作用;本地一个自包含的帮助函数
+/// 无此依赖,失败信息也更具体。
+func withTestTimeout<T: Sendable>(
+  _ seconds: Double = 20,
+  _ body: @escaping @Sendable () async throws -> T
+) async throws -> T {
+  let once = TestOnce()
+  return try await withCheckedThrowingContinuation {
+    (continuation: CheckedContinuation<T, any Error>) in
+    let deadline = Task.detached {
+      do {
+        try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+      } catch {
+        return  // 被取消:body 已经先返回了
+      }
+      if once.claim() {
+        continuation.resume(throwing: TestTimeoutError(seconds: seconds))
+      }
+    }
+    Task.detached {
+      do {
+        let value = try await body()
+        if once.claim() { continuation.resume(returning: value) }
+      } catch {
+        if once.claim() { continuation.resume(throwing: error) }
+      }
+      deadline.cancel()
+    }
+  }
+}
+
+/// 只让第一个调用者胜出。与 Sources/SwiftyPromise.swift 里的 ResumeGuard 同型
+/// ——那个是 private 的,跨模块用不了。
+private final class TestOnce: @unchecked Sendable {
+  private let lock = NSLock()
+  private var claimed = false
+
+  func claim() -> Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    guard !claimed else { return false }
+    claimed = true
+    return true
+  }
+}
+
 /// 线程安全的单值容器,供测试从异步回调里回传结果。
 ///
 /// 库里跨线程投递的回调(Promise 的任务闭包、UIImage.colors 的 complete)

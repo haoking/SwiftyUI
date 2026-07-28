@@ -249,34 +249,51 @@ final class SwiftyPromiseTests: XCTestCase {
 
   // MARK: - async 桥接
 
+  // 本节每一个 async 测试都把"可能挂起在 Promise 上"的那一段包进
+  // withTestTimeout(见 TestSupport.swift)。绝大多数测试里那就是整个函数体。
+  //
+  // 原因:这些测试等的是 Promise.value(),而它在链条无法终结时永不返回、
+  // 且不响应 Task 取消——一旦回归,失败模式是**挂死**而不是失败
+  // (testAsyncValueAfterStartDoesNotHang 与 testAsyncValueCalledTwiceDoesNotHang
+  // 保护的正是这类回归)。挂死时唯一的兜底是 CI 的 job 级 timeout,而
+  // Scripts/test.sh 只在 xcodebuild 退出之后才 grep 日志,被杀掉时什么诊断
+  // 信息都留不下。包上超时之后,同样的回归会在 20 秒内变成一条明确的失败。
+  // 这条规则在本节内统一适用,新增 async 测试请照此办理。
+
   func testAsyncValueReturnsFinalValue() async throws {
-    let value = try await Promise<String>.firstly(on: .background) { update, _ in
-      update("abc")
-    }.then { update, current in
-      update((current ?? "") + "-def")
-    }.value()
+    let value = try await withTestTimeout {
+      try await Promise<String>.firstly(on: .background) { update, _ in
+        update("abc")
+      }.then { update, current in
+        update((current ?? "") + "-def")
+      }.value()
+    }
 
     XCTAssertEqual(value, "abc-def")
   }
 
-  func testAsyncValueThrowsChainError() async {
+  func testAsyncValueThrowsChainError() async throws {
     do {
-      _ = try await Promise<String>.firstly(on: .background) { _, _ in
-        throw TestError()
-      }.value()
+      _ = try await withTestTimeout {
+        try await Promise<String>.firstly(on: .background) { _, _ in
+          throw TestError()
+        }.value()
+      }
       XCTFail("应当抛出链条中的错误")
-    } catch {
-      XCTAssertTrue(error is TestError)
+    } catch is TestError {
+      // 期望路径
     }
   }
 
   func testAsyncValueOnVoidPromise() async throws {
     let recorder = Recorder()
-    _ = try await Promise<Void>.firstly {
-      recorder.record("task1")
-    }.then {
-      recorder.record("task2")
-    }.value()
+    _ = try await withTestTimeout {
+      try await Promise<Void>.firstly {
+        recorder.record("task1")
+      }.then {
+        recorder.record("task2")
+      }.value()
+    }
 
     XCTAssertEqual(recorder.snapshot, ["task1", "task2"])
   }
@@ -298,10 +315,14 @@ final class SwiftyPromiseTests: XCTestCase {
     }
   }
 
+  /// 注意:"调用方零桥接"这条性质由 MainActorConsumer.load() 的函数体本身证明
+  /// (它是 @MainActor 隔离的,里面直接 `try await ....value()`,不做任何桥接),
+  /// 与本测试用什么方式去驱动它无关。因此把驱动动作包进 withTestTimeout
+  /// (闭包是非隔离的,对 consumer 的调用变成跨 actor 的 await)不会削弱判别力。
   @MainActor
   func testAsyncValueCallableFromMainActor() async throws {
     let consumer = MainActorConsumer()
-    try await consumer.load()
+    try await withTestTimeout { try await consumer.load() }
     XCTAssertEqual(consumer.received, "main-actor-value")
   }
 
@@ -310,31 +331,35 @@ final class SwiftyPromiseTests: XCTestCase {
   /// 进程会立刻因 SWIFT TASK CONTINUATION MISUSE 崩溃,因此跑 100 次
   /// 顺序调用,把"从未崩溃"当作证据的一部分。
   func testAsyncValueErrorPathNeverDoubleResumes() async throws {
-    for _ in 0..<100 {
-      do {
-        _ = try await Promise<String>.firstly(on: .background) { _, _ in
-          throw TestError()
-        }.value()
-        XCTFail("应当抛出链条中的错误")
-      } catch {
-        XCTAssertTrue(error is TestError)
+    try await withTestTimeout {
+      for _ in 0..<100 {
+        do {
+          _ = try await Promise<String>.firstly(on: .background) { _, _ in
+            throw TestError()
+          }.value()
+          XCTFail("应当抛出链条中的错误")
+        } catch is TestError {
+          // 期望路径
+        }
       }
     }
   }
 
   /// 并发跑多条会出错的链,让不同链之间的调度交织更复杂,
   /// 进一步放大二次 resume / continuation 泄漏可能暴露的窗口。
-  func testAsyncValueErrorPathConcurrentStress() async {
-    await withTaskGroup(of: Void.self) { group in
-      for _ in 0..<50 {
-        group.addTask {
-          do {
-            _ = try await Promise<String>.firstly(on: .background) { _, _ in
-              throw TestError()
-            }.value()
-            XCTFail("应当抛出链条中的错误")
-          } catch {
-            XCTAssertTrue(error is TestError)
+  func testAsyncValueErrorPathConcurrentStress() async throws {
+    try await withTestTimeout {
+      await withTaskGroup(of: Void.self) { group in
+        for _ in 0..<50 {
+          group.addTask {
+            do {
+              _ = try await Promise<String>.firstly(on: .background) { _, _ in
+                throw TestError()
+              }.value()
+              XCTFail("应当抛出链条中的错误")
+            } catch {
+              XCTAssertTrue(error is TestError)
+            }
           }
         }
       }
@@ -344,19 +369,21 @@ final class SwiftyPromiseTests: XCTestCase {
   /// 并发跑多条成功的链:既验证并发下取值互不串扰,也是对 always 闭包
   /// 改用强 self(而非 [weak self])这一决定的压力测试——如果强 self
   /// 的选择有问题,高并发、高频创建/释放 Promise 的场景更容易暴露竞态。
-  func testAsyncValueConcurrentSuccessStress() async {
-    await withTaskGroup(of: Void.self) { group in
-      for index in 0..<50 {
-        group.addTask {
-          do {
-            let value = try await Promise<String>.firstly(on: .background) { update, _ in
-              update("chain-\(index)")
-            }.then { update, current in
-              update((current ?? "") + "-done")
-            }.value()
-            XCTAssertEqual(value, "chain-\(index)-done")
-          } catch {
-            XCTFail("不应抛错: \(error)")
+  func testAsyncValueConcurrentSuccessStress() async throws {
+    try await withTestTimeout {
+      await withTaskGroup(of: Void.self) { group in
+        for index in 0..<50 {
+          group.addTask {
+            do {
+              let value = try await Promise<String>.firstly(on: .background) { update, _ in
+                update("chain-\(index)")
+              }.then { update, current in
+                update((current ?? "") + "-done")
+              }.value()
+              XCTAssertEqual(value, "chain-\(index)-done")
+            } catch {
+              XCTFail("不应抛错: \(error)")
+            }
           }
         }
       }
@@ -375,7 +402,8 @@ final class SwiftyPromiseTests: XCTestCase {
         update("abc")
       }
       weakPromise = promise
-      let value = try await promise.value()
+      // 只包住会挂起的这一句:下面的轮询本身已有 5 秒 deadline,不会挂死
+      let value = try await withTestTimeout { try await promise.value() }
       XCTAssertEqual(value, "abc")
     }
 
@@ -397,14 +425,16 @@ final class SwiftyPromiseTests: XCTestCase {
   ///
   /// 这里覆盖"先 start(),链条跑完之后再 value()"的场景。
   func testAsyncValueAfterStartDoesNotHang() async throws {
-    let promise = Promise<String>.firstly(on: .background) { update, _ in
-      update("done")
+    let value = try await withTestTimeout {
+      let promise = Promise<String>.firstly(on: .background) { update, _ in
+        update("done")
+      }
+      promise.start()
+      // 等链条确实跑完,确保下面的 value() 调用命中的是"已终结"分支,
+      // 而不是"已启动但仍在飞行中"这条本来就正确的路径。
+      try await Task.sleep(nanoseconds: 300_000_000)
+      return try await promise.value()
     }
-    promise.start()
-    // 等链条确实跑完,确保下面的 value() 调用命中的是"已终结"分支,
-    // 而不是"已启动但仍在飞行中"这条本来就正确的路径。
-    try await Task.sleep(nanoseconds: 300_000_000)
-    let value = try await promise.value()
     XCTAssertEqual(value, "done")
   }
 
@@ -412,11 +442,65 @@ final class SwiftyPromiseTests: XCTestCase {
   /// 第一次调用 await 返回时链条必然已经终结,第二次调用必须走"已终结"
   /// 分支立即返回,而不是挂起。
   func testAsyncValueCalledTwiceDoesNotHang() async throws {
-    let promise = Promise<String>.firstly(on: .background) { update, _ in
-      update("once")
+    let second = try await withTestTimeout {
+      let promise = Promise<String>.firstly(on: .background) { update, _ in
+        update("once")
+      }
+      _ = try await promise.value()
+      return try await promise.value()
     }
-    _ = try await promise.value()
-    let second = try await promise.value()
     XCTAssertEqual(second, "once")
+  }
+
+  // MARK: - value() 与已注册的 catch 处理器
+
+  /// `catch(_:)` 是替换语义;value() 曾经内部转手调用它,于是
+  /// `p.catch { showError($0) }` 之后再 `try await p.value()`,showError 被静默
+  /// 丢弃 —— 用户明明登记过错误处理器,却再也收不到错误。
+  ///
+  /// 判别力:把 value() 里的 addErrorHandler 改回 self.catch,最后那条断言
+  /// (先注册的处理器也必须收到错误)必然失败。头一段 do/catch 仍会通过,
+  /// 因为 value() 自己的处理器活了下来 —— 这正是这个缺陷"静默"的地方。
+  ///
+  /// 首个任务故意慢 0.3 秒:必须让 value() 在链条**仍在飞行中**时登记处理器,
+  /// 才会走到组合这条路径;链条若已终结,value() 走的是另一条(立即返回)分支。
+  func testAsyncValuePreservesPreviouslyRegisteredCatchHandler() async throws {
+    let caughtByCatch = Box(false)
+    let promise = Promise<String>.firstly(on: .background) { _, _ in
+      Thread.sleep(forTimeInterval: 0.3)
+      throw TestError()
+    }
+    promise.catch { _ in caughtByCatch.value = true }
+
+    do {
+      _ = try await withTestTimeout { try await promise.value() }
+      XCTFail("应当抛出链条中的错误")
+    } catch is TestError {
+      // 期望路径:value() 自己登记的处理器
+    }
+
+    XCTAssertTrue(
+      caughtByCatch.value,
+      "value() 之前登记的 catch 处理器必须照样收到错误,不能被 value() 覆盖掉")
+  }
+
+  /// 组合后两个处理器都必须被调用,且各只调用一次(组合不能变成重复调用)。
+  func testAsyncValueErrorReachesBothHandlersExactlyOnce() async throws {
+    let catchCallCount = Box(0)
+    let promise = Promise<String>.firstly(on: .background) { _, _ in
+      Thread.sleep(forTimeInterval: 0.3)
+      throw TestError()
+    }
+    promise.catch { _ in catchCallCount.value += 1 }
+
+    do {
+      _ = try await withTestTimeout { try await promise.value() }
+      XCTFail("应当抛出链条中的错误")
+    } catch is TestError {
+      // 期望路径
+    }
+
+    // markError 只会调用一次 errorBlock,组合闭包因此各调一次
+    XCTAssertEqual(catchCallCount.value, 1, "先注册的处理器应恰好被调用一次")
   }
 }

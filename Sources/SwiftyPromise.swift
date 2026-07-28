@@ -202,9 +202,36 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
   ///   标注,`promise.catch { self.label.text = ... }` 会被静默地放到后台线程执行,
   ///   而调用点是同步的、不跨隔离,编译器无从察觉。要在错误处理里碰 UI,
   ///   请自行跳回主 actor。
+  /// - Important: 本方法是**替换**语义 —— 它登记的是"这条链的错误处理器",
+  ///   重复调用后者覆盖前者,传 nil 则清空。库内部需要在不破坏调用方已登记
+  ///   处理器的前提下加挂自己的处理器时,走 addErrorHandler(_:) 而不是这里。
   public func `catch`(_ errorBlock: (@Sendable (Error) -> Void)? = nil) {
     withState { self.errorBlock = errorBlock }
     beginIfNeeded()
+  }
+
+  /// 追加一个错误处理器,而不是替换已有的那个。出错时按注册顺序全部调用。
+  ///
+  /// `catch(_:)` 是替换语义,库内部不能拿它当"加挂"用:调用方完全可能先
+  /// `p.catch { showError($0) }` 再 `try await p.value()`,若 value() 内部转手调
+  /// 一次 catch(_:),那个已经登记过的处理器就被静默丢弃了 —— 而 value() 的
+  /// 另一条(已终结)分支恰恰在注释里明确拒绝调用 catch(_:),给出的理由
+  /// 就是"会把已经注册过的 errorBlock 覆盖掉"。
+  ///
+  /// 读旧值与写组合值必须在同一个临界区内完成:先读后写会让两个并发的追加
+  /// 互相覆盖,只是把竞争窗口缩小而不是消除 —— 与 appendAlwaysIfUnfinished
+  /// 同一条理由。
+  private func addErrorHandler(_ handler: @escaping @Sendable (Error) -> Void) {
+    withState {
+      guard let existing = self.errorBlock else {
+        self.errorBlock = handler
+        return
+      }
+      self.errorBlock = { error in
+        existing(error)
+        handler(error)
+      }
+    }
   }
 
   /// 终结链条并以 await 取回最终值。
@@ -273,13 +300,19 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
 
       // 链条尚未终结:可能是全新链条(本次调用是第一个终结符),也可能
       // 链条已经被别的终结符启动、正在飞行中——两种情况下追加都是正确
-      // 的,fire() 迟早会走到 .finish 并排空 alwaysTasks。catch(_:) 内部
-      // 经同一把 isStarted 门闩(beginIfNeeded())判断是否真的需要启动;
-      // 已经在飞行中时它只负责登记 errorBlock,不会二次推进链条。
-      self.catch { error in
+      // 的,fire() 迟早会走到 .finish 并排空 alwaysTasks。
+      //
+      // 这里走 addErrorHandler 而不是 catch(_:):后者是替换语义,会把调用方
+      // 在 value() 之前登记的错误处理器整个丢掉(`p.catch { showError($0) }`
+      // 之后再 `try await p.value()`,showError 就再也收不到错误了)。
+      // 上面那条已终结分支拒绝调用 catch(_:) 用的正是同一条理由。
+      // catch(_:) 顺带做的 beginIfNeeded() 在下面显式补上:它经同一把 isStarted
+      // 门闩判断是否真的需要启动,已经在飞行中时不会二次推进链条。
+      self.addErrorHandler { error in
         guard resumed.claim() else { return }
         continuation.resume(throwing: error)
       }
+      self.beginIfNeeded()
     }
   }
 
