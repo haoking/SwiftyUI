@@ -460,7 +460,7 @@ final class SwiftyPromiseTests: XCTestCase {
   /// `p.catch { showError($0) }` 之后再 `try await p.value()`,showError 被静默
   /// 丢弃 —— 用户明明登记过错误处理器,却再也收不到错误。
   ///
-  /// 判别力:把 value() 里的 addInternalErrorHandler 改回 self.catch,最后那条
+  /// 判别力:把 registerValueWaiter 里那次内部槽位的登记改回 self.catch,最后那条
   /// 断言(先注册的处理器也必须收到错误)必然失败。头一段 do/catch 仍会通过,
   /// 因为 value() 自己的处理器活了下来 —— 这正是这个缺陷"静默"的地方。
   ///
@@ -544,6 +544,102 @@ final class SwiftyPromiseTests: XCTestCase {
     XCTAssertTrue(
       caughtByCatch.value,
       "value() 之后登记的 catch 处理器也必须收到错误")
+  }
+
+  // MARK: - value() 的登记窗口
+
+  /// **登记与出错之间不允许有第三种交错。**
+  ///
+  /// 曾经"追加 always 任务"与"加挂内部错误处理器"是 value() 里两个**独立**的
+  /// 临界区。链条若恰好在两者之间出错,markError 读到的 internalErrorHandler
+  /// 还是 nil —— 这个错误抵达不了任何人;随后 fire() 的 .finish 分支照常跑
+  /// value() 的 always 任务,以链条当时的值恢复 continuation。调用方拿到
+  /// Optional(99) 正常返回,完全看不出出过错。可达条件不是理论上的:只要另一个
+  /// 终结符已经把链条推进在飞就够了(start() 之后 value()、catch(_:) 之后
+  /// value()、两个并发的 value())。
+  ///
+  /// 这个窗口窄到直接测必然靠运气(在两次调用之间插入 0.25 秒的 sleep,40/40
+  /// 从"抛错"翻转成"返回 Optional(99)";不插则 40/40 正确)。所以这里不碰运气,
+  /// 用 debugSetValueRegistrationHook 把"错误恰好落在登记边界上"这一格变成
+  /// **确定命中**的:
+  ///   1. 链条第二步阻塞在 gate 上 —— 不放行就不可能抛错,也就不可能抢在
+  ///      value() 登记之前发生;
+  ///   2. value() 走完登记之后钩子才放行 gate,并一直等到 markError 已经**读过**
+  ///      处理器槽位才返回(errorBlock 是 markError 从槽位里读出来、在临界区外
+  ///      调用的第一个处理器,它被调用即证明那次读取已经发生)。
+  /// 于是错误确定地落在"登记刚刚结束"这一刻:
+  ///   · 登记是一个临界区 —— 处理器早已在槽位里,markError 读得到,value() 抛
+  ///     TestError;
+  ///   · 登记是两个临界区 —— 钩子正落在两者之间,处理器还没挂上去,markError
+  ///     读到 nil,value() 以 Optional(99) 正常返回。
+  ///
+  /// 判别力(已实测,见报告):把登记拆回 appendAlwaysIfUnfinished +
+  /// addInternalErrorHandler 两个临界区,本测试确定性变红。
+  func testValueRegistrationDoesNotSwallowConcurrentChainError() async throws {
+    let pool = SwiftyThreadPool()
+    let gate = DispatchSemaphore(value: 0)  // 放行链条抛错
+    let slotsRead = DispatchSemaphore(value: 0)  // markError 已读过处理器槽位
+
+    let promise = Promise<Int>.firstly(pool: pool, on: .background) { (update, _) in
+      update(99)
+    }.then(on: .background) { (_, _) in
+      // 不放行就一直等:保证错误不可能发生在 value() 登记之前
+      _ = gate.wait(timeout: .now() + 10)
+      throw TestError()
+    }
+
+    // catch(_:) 在这里身兼两职:它是第一个终结符(让链条在 value() 之前就飞
+    // 起来 —— 这正是本缺陷的可达条件),也是"markError 已经走出临界区"的信号。
+    promise.catch { _ in slotsRead.signal() }
+
+    promise.debugSetValueRegistrationHook {
+      gate.signal()
+      _ = slotsRead.wait(timeout: .now() + 10)
+    }
+
+    do {
+      let value = try await withTestTimeout { try await promise.value() }
+      XCTFail(
+        "链条出错了,value() 却以 \(String(describing: value)) 正常返回 —— 错误被整个吞掉")
+    } catch is TestError {
+      // 期望路径
+    }
+  }
+
+  /// **链条早已出错终结之后再调 value():必须重新抛出那个错误。**
+  ///
+  /// 2.1 之前错误对象根本没有被留下来,这条路径返回的是链条终结时的最后一个值
+  /// (这里是 Optional(5))—— 调用方连"出过错"都看不出来,而 README 一直宣称
+  /// 这里会抛。上一个测试关的是"出错与登记并发"那一路,这一个关的是"出错早已
+  /// 尘埃落定"那一路,两者走的是同一个判断的两个分支。
+  ///
+  /// 时序不靠 sleep:always 任务是在 fire() 的 .finish 分支里投递的,那时
+  /// isFinished 已经置位,所以 always 的任务体跑起来就证明链条确实终结了。
+  ///
+  /// 判别力(已实测,见报告):去掉登记临界区里 `if let error = self.error`
+  /// 这一路(退回只判 isFinished),本测试变红。
+  func testAsyncValueAfterSettledErrorRethrowsIt() async throws {
+    let pool = SwiftyThreadPool()
+    let settled = XCTestExpectation(description: "链条已终结")
+
+    let promise = Promise<Int>.firstly(pool: pool, on: .background) { (update, _) in
+      update(5)
+    }.then(on: .background) { (_, _) in
+      throw TestError()
+    }.always {
+      settled.fulfill()
+    }
+    promise.catch { _ in }
+
+    await fulfillment(of: [settled], timeout: 20)
+
+    do {
+      let value = try await withTestTimeout { try await promise.value() }
+      XCTFail(
+        "链条是因为出错才终结的,value() 却返回了 \(String(describing: value)) —— 应当重新抛出那个错误")
+    } catch is TestError {
+      // 期望路径
+    }
   }
 
   // MARK: - 取消(2.1)

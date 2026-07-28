@@ -145,7 +145,18 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
   ///
   /// 因此 `catch(_:)` 的公开语义(替换)一个字都不用改。
   private var internalErrorHandler: (@Sendable (Error) -> Void)?
-  private var isError: Bool = false
+  /// 终结这条链的错误;nil 表示至今没有出过错。
+  ///
+  /// 它同时充当原先那个独立的 `isError` 标志(fire() 据此丢弃剩余任务)——
+  /// "出过错"与"出的是哪个错"是同一个事实,分成两处存只会给它们留出走散的机会。
+  ///
+  /// 把错误**留下来**是必需的,不只是为了诊断:value() 若在 markError 读过
+  /// 槽位之后才登记自己的内部处理器,那次调用永远不会到达它,此时唯一还能交给
+  /// 调用方的就是这里存下的错误(见 registerValueWaiter)。
+  ///
+  /// 首次写入即定:后来的 markError 不顶替它 —— 真正终结链条、并被两个槽位的
+  /// 处理器实际收到的是第一个错误。
+  private var error: Error?
   private var isStarted: Bool = false
   private var isFinished: Bool = false
   private var value: T?
@@ -163,7 +174,13 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
     // 所以 errorBlock 必须是 @Sendable 的 —— 详见 catch(_:) 的说明。
     let handlers: (user: (@Sendable (Error) -> Void)?, internal: (@Sendable (Error) -> Void)?) =
       withState {
-        self.isError = true
+        // 存错误与读槽位在**同一个**临界区内完成,这是 registerValueWaiter
+        // 那边的判据能成立的前提:stateQueue 是串行的,因此对任何一次 value()
+        // 的注册来说,二者只有两种相对顺序 —— 要么注册在前(这里读到的槽位里
+        // 就有它的处理器),要么这里在前(注册那边读到 self.error 非 nil,
+        // 直接以这个错误恢复)。中间没有第三种可能,也就没有"错误谁都没收到"
+        // 的窗口。
+        if self.error == nil { self.error = error }
         return (self.errorBlock, self.internalErrorHandler)
       }
     // 顺序有意义:先调用方的,再库内部的。内部那个(value() 的)会恢复
@@ -375,26 +392,73 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
     beginIfNeeded()
   }
 
-  /// 往库内部那个槽位上加挂一个错误处理器。绝不触碰调用方的 `errorBlock`。
+  /// registerValueWaiter 在临界区内算出的、value() 该走哪条路。
+  private enum ValueRegistration {
+    /// 链条尚未终结也没出过错:always 任务与内部错误处理器都已登记妥当。
+    case registered
+    /// 链条已经终结且从未出错:以当前值立即恢复。
+    case settled
+    /// 链条已经出错(可能尚未走完终结):以这个错误立即恢复。
+    case failed(Error)
+  }
+
+  /// value() 的登记:**四**件事必须在同一个临界区内完成 —— 判"是否已出错"、
+  /// 判"是否已终结"、追加 always 任务、往库内部那个槽位加挂错误处理器。
   ///
-  /// 内部槽位自己是**追加**语义:同一个 Promise 上可能有多个并发的 `value()`
-  /// 调用,各自持有一个只能恢复一次的 continuation。若这里写成替换,后一次
-  /// 调用会把前一次的处理器顶掉,前一个 await 就永远挂在那里了。
+  /// 绝不触碰调用方的 `errorBlock`;内部槽位自己是**追加**语义:同一个 Promise
+  /// 上可能有多个并发的 `value()` 调用,各自持有一个只能恢复一次的 continuation。
+  /// 若写成替换,后一次调用会把前一次的处理器顶掉,前一个 await 就永远挂在
+  /// 那里了。读旧值与写组合值同样必须在同一个临界区内完成,否则两个并发的追加
+  /// 会互相覆盖。
   ///
-  /// 读旧值与写组合值必须在同一个临界区内完成:先读后写会让两个并发的追加
-  /// 互相覆盖,只是把竞争窗口缩小而不是消除 —— 与 appendAlwaysIfUnfinished
-  /// 同一条理由。
-  private func addInternalErrorHandler(_ handler: @escaping @Sendable (Error) -> Void) {
+  /// 为什么四件事不能拆开:曾经"追加 always"与"加挂错误处理器"是两个独立的
+  /// 临界区,链条若恰好在两者之间出错,markError 读到的 internalErrorHandler
+  /// 还是 nil,**这个错误抵达不了任何人**;随后 fire() 的 .finish 分支照常跑
+  /// value() 的 always 任务,以 self.currentValue 恢复 continuation —— 调用方
+  /// 拿到一个静默的错误结果。窗口很窄,但 stateQueue 一有争用就会变宽,且
+  /// "另一个终结符已经把链条推进在飞"是这条路径的常规触发条件(start() 之后
+  /// value()、catch(_:) 之后 value()、两个并发的 value())。
+  /// 回归测试:testValueRegistrationDoesNotSwallowConcurrentChainError。
+  ///
+  /// `.failed` 这一路顺带修好了另一件事:链条**早已出错终结**时,2.1 之前
+  /// value() 返回的是最后一个值,那个错误被整个吞掉(错误当时根本没被留下来)。
+  /// 现在它会被重新抛出。
+  private func registerValueWaiter(
+    _ alwaysTask: PromiseTask,
+    onError handler: @escaping @Sendable (Error) -> Void
+  ) -> ValueRegistration {
     withState {
+      // 先判错误,再判终结:出过错就一定会走到终结,反过来不成立,而调用方
+      // 想知道的是那个错误,不是错误发生前留在链条上的那个值。
+      if let error = self.error { return .failed(error) }
+      guard !isFinished else { return .settled }
+      alwaysTasks.append(alwaysTask)
       guard let existing = self.internalErrorHandler else {
         self.internalErrorHandler = handler
-        return
+        return .registered
       }
       self.internalErrorHandler = { error in
         existing(error)
         handler(error)
       }
+      return .registered
     }
+  }
+
+  /// 仅供测试的注入点,生产路径上恒为 nil。见 debugSetValueRegistrationHook(_:)。
+  private var valueRegistrationHook: (@Sendable () -> Void)?
+
+  /// 仅供测试:装一个在 `value()` 走完 registerValueWaiter、尚未
+  /// `beginIfNeeded()` 时调用的闭包。
+  ///
+  /// 存在的理由:registerValueWaiter 要钉住的性质是"链条出错与 value() 登记
+  /// 之间没有第三种交错",而这个交错窗口在拆成两个临界区的旧实现上也窄到
+  /// 直接测必然靠运气(什么都不做时 40/40 正确,插入 0.25 秒 sleep 后 40/40 翻转)。
+  /// 测试在这个钩子里放行链条抛错、并等 markError 跑完,就把"错误恰好落在
+  /// 登记边界上"这一格变成确定命中的了 —— 登记若退回两个临界区,错误就落在
+  /// 它们中间,测试确定性变红。
+  internal func debugSetValueRegistrationHook(_ hook: (@Sendable () -> Void)?) {
+    withState { self.valueRegistrationHook = hook }
   }
 
   /// 终结链条并以 await 取回最终值。
@@ -402,17 +466,17 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
   /// 与 start() / catch(_:) 一样,本方法也是终结符。但重复终结对它是良性
   /// 的:调用时如果链条已经终结过(无论是被更早一次 start()、catch(_:)
   /// 还是 value() 调用终结的),本方法不会像 then()/always() 那样把回调
-  /// 静默丢进一个不会再被处理的队列里、把调用方永远挂起——而是立即以链条
-  /// 终结时的最后一个值返回。即便链条当初是因为出错才终结的,这种情况下
-  /// 也**不会**重新抛出那个错误(错误对象本身没有被保留下来),而是照样
-  /// 返回最后的值。
+  /// 静默丢进一个不会再被处理的队列里、把调用方永远挂起——而是立即返回。
+  /// 链条当初若是因为出错才终结的,本方法**重新抛出**那个错误;否则以链条
+  /// 终结时的最后一个值返回。(2.1 之前错误没有被留下来,这种情形下会照样
+  /// 返回最后的值,把错误整个吞掉。)
   ///
   /// - Important: 没有任何任务调用过 update(...) 时,返回值是 nil——
   ///   `Promise<Void>.value()` 因此恒为 nil,不是 `()`。
   /// - Important: 这个 await **不响应** Swift Task 的取消:所在 Task 被
   ///   取消后,本方法仍会一直等到链条终结才返回或抛错。
-  /// - Important: 链条被取消、**且队列仍能继续排空**时(例如收到内存告警
-  ///   调用 removeAll(),而池未被挂起),本方法抛出 `PromiseError.cancelled`。
+  /// - Important: 链条被取消、**且队列仍能继续排空**时(例如收到内存
+  ///   告警调用 removeAll(),而池未被挂起),本方法抛出 `PromiseError.cancelled`。
   ///   这一点自 2.1 起成立;2.0 在这种情形下会永久挂起。
   ///   "队列仍能继续排空"这个前提是必要的:取消本身不会让 operation 结束,
   ///   是队列**跑到**它才让它结束的 —— 挂起的 OperationQueue 不会 finish
@@ -465,10 +529,16 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
         continuation.resume(returning: self.currentValue)
       }
 
-      // 注册与"链条是否已经终结"的判断必须在同一个临界区内完成
-      // (appendAlwaysIfUnfinished 内部经 withState),否则只是把竞争
-      // 窗口缩小,而不是消除:如果先查后加,fire() 可能恰好在两次访问
-      // 之间把 alwaysTasks 排空,让这次追加白追加。
+      // 判"是否已出错"、判"是否已终结"、追加 always 任务、加挂内部错误处理器,
+      // 四件事在 registerValueWaiter 的**同一个**临界区内完成 —— 拆开任何一刀
+      // 都只是把竞争窗口缩小而不是消除,详见那里的说明。
+      //
+      // 错误处理器登记在**库内部那个槽位**上,而不是调用方的 errorBlock 上。
+      // 这样两个方向都成立,与 catch(_:) 的调用顺序无关:
+      //   catch 在前 —— 调用方登记的处理器不会被这里覆盖;
+      //   catch 在后 —— catch(_:) 只写 errorBlock,覆盖不掉这个处理器,
+      //                 这个 await 因此不会被别人的一句 catch 挂死。
+      // 曾经这里是 `self.catch { ... }`,两个方向都会坏掉一个。
       //
       // onCancelled 是"取消 → 不再挂死"的最后一环:上面那个 alwaysOperation
       // 一旦在开始执行前被取消,它的执行块就不运行,resumed 永远不会被 claim,
@@ -478,43 +548,48 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
       // operation 被取消时调用下面这个闭包,以 .cancelled 恢复 continuation。
       //
       // ResumeGuard 保证只恢复一次,所以"块正常跑完(返回当前值)"与"块被取消
-      // (抛 .cancelled)"这两条路径无论谁先到都是安全的 —— 与出错路径上
-      // internalErrorHandler 和这个块相争时是同一套保证。
-      guard
-        appendAlwaysIfUnfinished(
-          .create(
-            nil, .background, alwaysOperation, runFlag: flag,
-            onCancelled: {
-              guard resumed.claim() else { return }
-              continuation.resume(throwing: PromiseError.cancelled)
-            }))
-      else {
-        // 链条已经终结:上面这个 always 任务永远不会被 fire() 排空到,
-        // 也就永远不会执行。立即以当前值恢复,也不必登记任何错误处理器 ——
-        // 链条已经终结,不会再产生新的错误。
+      // (抛 .cancelled)"这两条路径无论谁先到都是安全的 —— 与出错路径上 internalErrorHandler 和这个块
+      // 相争时是同一套保证。
+      let registration = registerValueWaiter(
+        .create(
+          nil, .background, alwaysOperation, runFlag: flag,
+          onCancelled: {
+            guard resumed.claim() else { return }
+            continuation.resume(throwing: PromiseError.cancelled)
+          }),
+        onError: { error in
+          guard resumed.claim() else { return }
+          continuation.resume(throwing: error)
+        })
+
+      // 仅供测试的注入点,生产路径上恒为 nil。放在这里而不是别处:它要撑开的
+      // 正是"登记刚刚完成"这一格。
+      withState { self.valueRegistrationHook }?()
+
+      switch registration {
+      case .registered:
+        // 链条尚未终结:可能是全新链条(本次调用是第一个终结符),也可能链条
+        // 已经被别的终结符启动、正在飞行中 —— 两种情况下追加都是正确的,
+        // fire() 迟早会走到 .finish 并排空 alwaysTasks。
+        //
+        // beginIfNeeded() 显式调用(以前由 catch(_:) 顺带完成):它经同一把
+        // isStarted 门闩判断是否真的需要启动,已经在飞行中时不会二次推进链条。
+        self.beginIfNeeded()
+      case .settled:
+        // 链条已经终结且没出过错:上面那个 always 任务没有被追加,永远不会
+        // 执行,也没有任何错误处理器登记在案 —— 立即以最后的值恢复。
         guard resumed.claim() else { return }
         continuation.resume(returning: self.currentValue)
-        return
-      }
-
-      // 链条尚未终结:可能是全新链条(本次调用是第一个终结符),也可能
-      // 链条已经被别的终结符启动、正在飞行中——两种情况下追加都是正确
-      // 的,fire() 迟早会走到 .finish 并排空 alwaysTasks。
-      //
-      // 登记在**库内部那个槽位**上,而不是调用方的 errorBlock 上。
-      // 这样两个方向都成立,与 catch(_:) 的调用顺序无关:
-      //   catch 在前 —— 调用方登记的处理器不会被这里覆盖;
-      //   catch 在后 —— catch(_:) 只写 errorBlock,覆盖不掉下面这个处理器,
-      //                 这个 await 因此不会被别人的一句 catch 挂死。
-      // 曾经这里是 `self.catch { ... }`,两个方向都会坏掉一个。
-      //
-      // beginIfNeeded() 显式补上(以前由 catch(_:) 顺带完成):它经同一把
-      // isStarted 门闩判断是否真的需要启动,已经在飞行中时不会二次推进链条。
-      self.addInternalErrorHandler { error in
+      case .failed(let error):
+        // 链条已经出错。同上,这里没有别的路径能碰这个 continuation:
+        // always 任务没被追加,处理器也没登记。直接把错误交给调用方。
+        //
+        // 这条路径**不**保证调用方 errorBlock 已经跑完 —— markError 里那条
+        // "先调用方的、再库内部的"顺序,只对在出错之前就登记好的处理器成立。
+        // 本次调用是在错误发生**之后**才到的,本来就不存在可言的顺序。
         guard resumed.claim() else { return }
         continuation.resume(throwing: error)
       }
-      self.beginIfNeeded()
     }
   }
 
@@ -579,7 +654,7 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
     let next: PromiseNext = withState {
       guard !isFinished else { return .nothing }
 
-      if isError {
+      if self.error != nil {
         // 出错:丢弃剩余任务,直接进入终结
         tasks.removeAll()
         isFinished = true
@@ -619,7 +694,7 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
         // isCancelled 单独成立不够:取消若发生在执行期间,工作其实已完成,
         // 此时判为取消会丢弃一个有效结果(见 RunFlag 的说明)。
         if op?.isCancelled == true && !flag.didRun {
-          // markError 置 isError,紧接着的 fire() 会走 isError 分支丢弃剩余
+          // markError 存下错误,紧接着的 fire() 会走"已出错"分支丢弃剩余
           // 任务并终结 —— 复用既有的错误终结路径,不新增状态。
           self.markError(PromiseError.cancelled)
         }
