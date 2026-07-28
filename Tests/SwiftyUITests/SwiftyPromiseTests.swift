@@ -733,6 +733,10 @@ final class SwiftyPromiseTests: XCTestCase {
       "value() 的 always 任务应当已排在这个挂起的池里;为 0 说明它根本没进这个池")
 
     XCTAssertTrue(pool.removeAll(), "应当取消到排队中的 always 任务")
+    // 这行是必需的,不是收尾清理:取消本身不会让 operation 结束,是队列**跑到**
+    // 它才让它结束的。挂起的 OperationQueue 不会 finish 任何 operation(包括
+    // 已被取消的),completionBlock 因此不触发,onCancelled 也就不会被调用 ——
+    // 删掉这行,即便修复在位,本测试也会以 10 秒超时失败。
     pool.restart()
 
     do {

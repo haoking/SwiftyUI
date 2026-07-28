@@ -378,17 +378,23 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
   ///   `Promise<Void>.value()` 因此恒为 nil,不是 `()`。
   /// - Important: 这个 await **不响应** Swift Task 的取消:所在 Task 被
   ///   取消后,本方法仍会一直等到链条终结才返回或抛错。
-  /// - Important: 链条被取消时(例如 SwiftyThreadPool 收到内存告警调用
-  ///   removeAll()),本方法抛出 `PromiseError.cancelled`。这一点自 2.1 起
-  ///   成立;2.0 在这种情形下会永久挂起。
+  /// - Important: 链条被取消、**且队列仍能继续排空**时(例如收到内存告警
+  ///   调用 removeAll(),而池未被挂起),本方法抛出 `PromiseError.cancelled`。
+  ///   这一点自 2.1 起成立;2.0 在这种情形下会永久挂起。
+  ///   "队列仍能继续排空"这个前提是必要的:取消本身不会让 operation 结束,
+  ///   是队列**跑到**它才让它结束的 —— 挂起的 OperationQueue 不会 finish
+  ///   任何 operation,包括已被取消的,completionBlock 因此不会触发。
   /// - Important: 如果链条因为别的原因永远无法终结,本方法仍然不会返回。
-  ///   两种已知情形:线程池被 `stop()` 之后再没 `restart()`;以及线程池在
-  ///   本链条投递之前就被 `cancel()` 过 —— 此时 `add()` 内部的
-  ///   `guard let queue = currentQueue` 直接放弃,operation 根本没有进过
-  ///   任何队列,也就永远不会有 completionBlock 触发,上面那条取消路径
-  ///   接不住它。注意 `cancel()` 横跨两种情形:在它之前就已排队的
-  ///   operation 会被取消,那条路径**会**抛 `.cancelled`;在它之后才投递的
-  ///   则被静默丢弃,落到本条。
+  ///   三种已知情形:
+  ///   1. 线程池被 `stop()` 之后再没 `restart()` —— 队列根本不跑。
+  ///   2. 线程池在本链条投递**之前**就被 `cancel()` 过 —— `add()` 内部的
+  ///      `guard let queue = currentQueue` 直接放弃,operation 根本没有进过
+  ///      任何队列,也就永远不会有 completionBlock。
+  ///   3. 池在**挂起状态**下被 `removeAll()` 或 `cancel()` —— 被取消的
+  ///      operation 在队列恢复之前不会 finish。其中 `cancel()` 这条尤其
+  ///      要命:它把 queue 置 nil,而 `restart()` 是 `currentQueue?.isSuspended
+  ///      = false`,对 nil 是空操作 —— 这条路径**再也无法恢复**。
+  ///      (第 3 条的行为修复不在 2.1 范围内,见仓库 issue。)
   public func value() async throws -> T? {
     return try await withCheckedThrowingContinuation { continuation in
       // 用一个 box 保证 continuation 只被恢复一次:链条正常结束与出错
