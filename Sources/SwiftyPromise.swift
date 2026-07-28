@@ -349,6 +349,13 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
   /// - Important: 链条一旦终结(start()/catch(_:)/value() 任一调用过且已跑完),
   ///   本方法追加的任务**永远不会执行**。2.1 起这在 debug 构建下会
   ///   assertionFailure;release 构建保持无操作。Promise 是一次性的。
+  /// - Important: 本方法追加的任务若在开始执行前被取消(最常见的来源是
+  ///   `SwiftyThreadPool` 收到内存告警调用 `removeAll()`),它会被**静默跳过**
+  ///   —— 没有回调,也没有任何信号。always 任务是在链条**终结之后**才投递的,
+  ///   此时错误已经无处可去:`catch(_:)` 的处理器只接收链条自己的错误,而
+  ///   `value()` 的 continuation 由它自己那个内部 always 任务负责。需要知道
+  ///   收尾工作有没有真的做完,请在任务体自己记录。
+  /// - Important: 任务体抛出的错误同样被吞掉,理由相同。
   @discardableResult
   public func always(
     with identifier: String? = nil, on perform: ThreadPerform = .background,
@@ -726,6 +733,18 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
         let flag = task.runFlag
         let onCancelled = task.onCancelled
         task.op.completionBlock = { [weak op = task.op] in
+          // 与 .run 分支的守卫同形,但**判别力完全不同,必须说白**:
+          // 把下面整个条件换成无条件的 `onCancelled?()`,全套测试依然全绿。
+          // 不是覆盖缺口没人补,而是今天确实观察不到差别 ——
+          //   · 用户经 always(_:) 追加的任务 onCancelled 恒为 nil,无条件调用
+          //     也是空操作;
+          //   · 唯一的传入者是 value(),它的 onCancelled 被 ResumeGuard 包着,
+          //     而块正常跑完时那条路径已经先 claim 过了,重复调用被吞掉;
+          //     加之两条路径现在恢复的是同一个值(见 value() 的说明),连
+          //     "谁赢"都观察不出来。
+          // 所以这个守卫今天靠的是人维持,不是测试维持。它一旦有了**非幂等**
+          // 的 onCancelled 生产者(或两条路径恢复的东西不再相同),无条件调用
+          // 就会立刻变成缺陷 —— 那时请连同回归测试一起补上。
           if op?.isCancelled == true && !flag.didRun {
             // 用户经 always(_:) 追加的任务没有 onCancelled —— 链条已终结,
             // 错误无处可去。只有 value() 会传,用来恢复它的 continuation。
