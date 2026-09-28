@@ -23,7 +23,7 @@ final class SwiftyGlobalTests: XCTestCase {
 
   /// modelName 在模拟器上应返回 "Simulator"。
   func testModelName() {
-    XCTAssertFalse(SwiftyGlobal.modelName.isEmpty)
+    XCTAssertEqual(SwiftyGlobal.modelName, "Simulator")
   }
 
   /// B17:改为计算属性后必须实时反映当前状态,而不是首次访问时的快照。

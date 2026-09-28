@@ -1,6 +1,6 @@
 //
-//  SwiftyTask.swift
-//  WHCWSIFT
+//  SwiftyThreadPool.swift
+//  SwiftyUI
 //
 //  Created by Haochen Wang on 10/10/17.
 //  Copyright © 2017 Haochen Wang. All rights reserved.
@@ -9,13 +9,13 @@
 import UIKit
 
 public final class SwiftyThreadPool: @unchecked Sendable {
-  private var MAX_THREAD_COUNT: Int {
+  /// 并发上限:2 × hw.activecpu − 1,下限 3。建池时算一次 —— 它曾是计算属性,
+  /// 每次 add() 都调一遍 sysctlbyname 并重设并发数。
+  private static func maxThreadCount() -> Int {
     var activecpu: UInt32 = 0
     var size = MemoryLayout<UInt32>.size
     sysctlbyname("hw.activecpu", &activecpu, &size, nil, 0)
-    let avaliableCount: Int = 2 * Int(activecpu) - 1
-    let result: Int = avaliableCount > 3 ? avaliableCount : 3
-    return result
+    return max(2 * Int(activecpu) - 1, 3)
   }
 
   public static let `default`: SwiftyThreadPool = {
@@ -47,7 +47,7 @@ public final class SwiftyThreadPool: @unchecked Sendable {
   // 对外仍只暴露静态单例访问器。
   init() {
     let queue: OperationQueue = OperationQueue()
-    queue.maxConcurrentOperationCount = MAX_THREAD_COUNT
+    queue.maxConcurrentOperationCount = Self.maxThreadCount()
     // 必须先赋值再做任何投递:add 内部通过 currentQueue 读取 queue,在赋值
     // 之前调用会被静默丢弃 —— 1.x 就是这样把常驻 RunLoop operation 丢掉的(B9)。
     // 那个 operation 已在 2.0 删除(理由见下方 deinit 的说明),但这条赋值顺序
@@ -66,27 +66,34 @@ public final class SwiftyThreadPool: @unchecked Sendable {
 
   /// 添加一个 operation 到队列。
   ///
+  /// 传了 `identifier` 就把它写进 `op.name`,之后可以按它 remove / 查找;不传则保留
+  /// `op.name` 原有的值。
+  ///
   /// 注意:`cancel()` 会把内部队列置为 nil;在那之后调用 `add` 会被
   /// 静默丢弃 —— 不会抛错、不会返回值、也没有任何日志。调用方需要自行
   /// 保证不在 `cancel()` 之后继续 `add`。
   public func add(_ op: Operation, withIdentifier identifier: String? = nil) {
-    guard let queue = currentQueue else { return }
-    op.name = identifier
+    // 投递也在锁内完成,与 cancel() 的"取出并置 nil"互斥:否则可能在 cancel() 取消完
+    // 之后,才把 op 投进那个即将被丢弃的队列,它就不会被取消。
+    // addOperation 不会同步回调本类型,持锁调用没有重入问题。
+    lock.lock()
+    defer { lock.unlock() }
+    guard let queue else { return }
+    if let identifier { op.name = identifier }
     queue.addOperation(op)
-    queue.maxConcurrentOperationCount = MAX_THREAD_COUNT
   }
 
+  /// 取消队列里**全部** name 等于 `identifier` 的 operation。
+  ///
+  /// 返回是否找到了至少一个。注意"找到"不等于"拦下了":尚未开始的 operation 不会再执行,
+  /// 但已经在执行的 BlockOperation 不看 isCancelled,会照常跑完。
   @discardableResult
   public func remove(withIdentifier identifier: String) -> Bool {
+    guard let queue = currentQueue else { return false }
     var removed = false
-    guard let queue = currentQueue else { return removed }
-    for (_, op) in queue.operations.enumerated().reversed() {
-      if op.name == identifier {
-        op.cancel()
-        removed = true
-        queue.maxConcurrentOperationCount = MAX_THREAD_COUNT
-        break
-      }
+    for op in queue.operations where op.name == identifier {
+      op.cancel()
+      removed = true
     }
     return removed
   }
@@ -96,9 +103,6 @@ public final class SwiftyThreadPool: @unchecked Sendable {
     var removed = false
     guard let queue = currentQueue else { return removed }
     if !queue.operations.isEmpty {
-      for (_, op) in queue.operations.enumerated().reversed() {
-        op.cancel()
-      }
       queue.cancelAllOperations()
       removed = true
     }
@@ -108,11 +112,9 @@ public final class SwiftyThreadPool: @unchecked Sendable {
   public func operation(withIdentifier identifier: String) -> Operation? {
     var tagOp: Operation?
     guard let queue = currentQueue else { return tagOp }
-    for (_, op) in queue.operations.enumerated().reversed() {
-      if op.name == identifier {
-        tagOp = op
-        break
-      }
+    for op in queue.operations.reversed() where op.name == identifier {
+      tagOp = op
+      break
     }
     return tagOp
   }
@@ -138,10 +140,13 @@ public final class SwiftyThreadPool: @unchecked Sendable {
   }
 
   public func cancel() {
-    removeAll()
+    // 取出与置 nil 在同一个临界区里完成,再取消取出来的那个队列。曾经是先 removeAll()
+    // 再加锁置 nil,两步之间 add() 进来的 op 落进被丢弃的队列,却没被取消。
     lock.lock()
+    let detached = queue
     queue = nil
     lock.unlock()
+    detached?.cancelAllOperations()
   }
 
   /// 2.0 删除了 1.x 的 `prepareEnvironment()` —— 一个在 init 里投递、跑一个

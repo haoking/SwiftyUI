@@ -58,31 +58,24 @@ private final class RunFlag: @unchecked Sendable {
 }
 
 private struct PromiseTask {
-  var identifier: String?
-  var perform: ThreadPerform
-  var op: Operation
+  let identifier: String?
+  let perform: ThreadPerform
+  let op: Operation
   /// 与本任务的 op 一一对应,由 op 的执行块置位。
   let runFlag: RunFlag
   /// 仅 value() 传入:该 always 任务被取消时用来抛错恢复 continuation。
   /// 用户经 always(_:) 追加的任务不设此项 —— 链条此时已终结,错误无处可去。
   let onCancelled: (@Sendable () -> Void)?
 
-  private init(
-    _ identifier: String? = nil, _ perform: ThreadPerform = .background, _ op: Operation,
-    _ runFlag: RunFlag, _ onCancelled: (@Sendable () -> Void)?
+  init(
+    _ identifier: String?, _ perform: ThreadPerform, _ op: Operation,
+    runFlag: RunFlag, onCancelled: (@Sendable () -> Void)? = nil
   ) {
     self.identifier = identifier
     self.perform = perform
     self.op = op
     self.runFlag = runFlag
     self.onCancelled = onCancelled
-  }
-
-  static func create(
-    _ identifier: String? = nil, _ perform: ThreadPerform = .background, _ op: Operation,
-    runFlag: RunFlag, onCancelled: (@Sendable () -> Void)? = nil
-  ) -> PromiseTask {
-    return PromiseTask(identifier, perform, op, runFlag, onCancelled)
   }
 
   /// 池由调用方传入而不是直接取 SwiftyThreadPool.default:取消语义必须能在
@@ -252,7 +245,7 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
   ) {
     self.pool = pool
     let built = operationBuild(work)
-    tasks.append(.create(identifier, perform, built.op, runFlag: built.flag))
+    tasks.append(PromiseTask(identifier, perform, built.op, runFlag: built.flag))
   }
 
   private init(
@@ -262,7 +255,7 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
   ) {
     self.pool = pool
     let built = operationBuildT(work)
-    tasks.append(.create(identifier, perform, built.op, runFlag: built.flag))
+    tasks.append(PromiseTask(identifier, perform, built.op, runFlag: built.flag))
   }
 
   @discardableResult
@@ -314,7 +307,7 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
     _ work: (@Sendable () throws -> Void)?
   ) -> Promise {
     let built = operationBuild(work)
-    if !appendTaskIfUnfinished(.create(identifier, perform, built.op, runFlag: built.flag)) {
+    if !appendTaskIfUnfinished(PromiseTask(identifier, perform, built.op, runFlag: built.flag)) {
       // 编程错误,不是运行时错误:链条已经终结,这个任务永远不会被执行。
       // debug 当场暴露;release 保持无操作(与 2.0 行为一致)。
       //
@@ -337,7 +330,7 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
     work: @escaping @Sendable (_ update: (T?) -> Void, _ value: T?) throws -> Void
   ) -> Promise {
     let built = operationBuildT(work)
-    if !appendTaskIfUnfinished(.create(identifier, perform, built.op, runFlag: built.flag)) {
+    if !appendTaskIfUnfinished(PromiseTask(identifier, perform, built.op, runFlag: built.flag)) {
       // 理由与上一个 then 完全相同,见那里的说明。
       assertionFailure("向已终结的 Promise 追加 then;该任务永远不会执行")
     }
@@ -368,7 +361,7 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
       flag.markRun()
       _ = try? work?()
     }
-    if !appendAlwaysIfUnfinished(.create(identifier, perform, operation, runFlag: flag)) {
+    if !appendAlwaysIfUnfinished(PromiseTask(identifier, perform, operation, runFlag: flag)) {
       assertionFailure("向已终结的 Promise 追加 always;该任务永远不会执行")
     }
     return self
@@ -579,7 +572,7 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
       // 无论谁先到都是安全的 —— 与出错路径上 internalErrorHandler 和这个块
       // 相争时是同一套保证。
       let registration = registerValueWaiter(
-        .create(
+        PromiseTask(
           nil, .background, alwaysOperation, runFlag: flag,
           onCancelled: {
             guard resumed.claim() else { return }
@@ -651,14 +644,14 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
   /// 测试不能直接调 then {} —— debug 下 assertionFailure 会中止测试进程。
   internal func debugAppendTaskAccepted() -> Bool {
     let built = operationBuild(nil)
-    return appendTaskIfUnfinished(.create(nil, .background, built.op, runFlag: built.flag))
+    return appendTaskIfUnfinished(PromiseTask(nil, .background, built.op, runFlag: built.flag))
   }
 
   /// 仅供测试:同上,针对 always 队列。
   internal func debugAppendAlwaysAccepted() -> Bool {
     let flag = RunFlag()
     return appendAlwaysIfUnfinished(
-      .create(nil, .background, BlockOperation { flag.markRun() }, runFlag: flag))
+      PromiseTask(nil, .background, BlockOperation { flag.markRun() }, runFlag: flag))
   }
 
   /// 终结只生效一次:重复调用 start()/catch(),或两者都调用,都不会二次推进链条
@@ -736,7 +729,8 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
         //
         // 这个 completionBlock 是 2.1 新加的。2.0 里 always 任务是"投递完就
         // 不管"的,一旦被取消就彻底静默 —— 而 value() 恰恰把恢复 continuation
-        // 的逻辑放在一个 always 任务里,于是 await 永远挂在那里(见 Task 3)。
+        // 的逻辑放在一个 always 任务里,于是 await 永远挂在那里(见
+        // docs/superpowers/plans/2026-07-28-swiftyui-2.1-promise-cancellation.md 的 Task 3)。
         let flag = task.runFlag
         let onCancelled = task.onCancelled
         task.op.completionBlock = { [weak op = task.op] in

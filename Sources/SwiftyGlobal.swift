@@ -1,6 +1,6 @@
 //
 //  SwiftyGlobal.swift
-//  WHCWSIFT
+//  SwiftyUI
 //
 //  Created by Haochen Wang on 9/28/17.
 //  Copyright © 2017 Haochen Wang. All rights reserved.
@@ -42,7 +42,9 @@ public enum SwiftyGlobal {
   /// 导航栏无关,且随横竖屏变化,本身就是错的(B2)。
   public static var safeAreaInsets: UIEdgeInsets { keyWindow?.safeAreaInsets ?? .zero }
 
-  /// 设备型号名。未知型号返回原始 identifier。
+  /// 设备型号标识符,即 `uname` 的 machine 字段(如 `"iPhone17,1"`);模拟器返回 `"Simulator"`。
+  ///
+  /// 不做任何"标识符 → 可读名称"的映射:1.x 的映射表已在 2.0 删除,真机一律返回原始标识符。
   public nonisolated static let modelName: String = {
     var systemInfo = utsname()
     uname(&systemInfo)
@@ -59,6 +61,7 @@ public enum SwiftyGlobal {
   }()
 }
 
+@available(*, deprecated, message: "全库从未使用过这个类型,将在下个大版本移除。")
 public final class ClosureVoidWrapper {
   public var closure: (() -> Void)?
 

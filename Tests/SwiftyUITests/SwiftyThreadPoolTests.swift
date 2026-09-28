@@ -42,11 +42,50 @@ final class SwiftyThreadPoolTests: XCTestCase {
     release.fulfill()
   }
 
+  /// 不传 identifier 时,add() 不能抹掉调用方自己设好的 op.name。
+  ///
+  /// add() 曾经无条件执行 `op.name = identifier`,不传就写成 nil,
+  /// 之后按原名 remove / operation(withIdentifier:) 都找不到它。
+  ///
+  /// 判别力:改回无条件赋值,两条断言都失败。
+  func testAddWithoutIdentifierKeepsExistingName() {
+    pool.stop()
+    let op = BlockOperation {}
+    op.name = "mine"
+
+    pool.add(op)
+
+    XCTAssertEqual(op.name, "mine")
+    XCTAssertTrue(pool.operation(withIdentifier: "mine") === op)
+  }
+
+  /// remove(withIdentifier:) 取消**全部**同名 operation。
+  ///
+  /// 它曾倒序找到第一个就 break,只取消了最后加入的那个:多条 Promise 链共用一个
+  /// identifier 时只停下一条,其余照跑。
+  ///
+  /// 判别力:改回找到一个就 break,第一个 operation 不会被取消。
+  func testRemoveByIdentifierCancelsEveryMatchingOperation() {
+    pool.stop()
+    let first = BlockOperation {}
+    let second = BlockOperation {}
+    let other = BlockOperation {}
+    pool.add(first, withIdentifier: "same")
+    pool.add(second, withIdentifier: "same")
+    pool.add(other, withIdentifier: "other")
+
+    XCTAssertTrue(pool.remove(withIdentifier: "same"))
+
+    XCTAssertTrue(first.isCancelled, "先加入的同名 operation 也必须被取消")
+    XCTAssertTrue(second.isCancelled)
+    XCTAssertFalse(other.isCancelled, "不同名的不受影响")
+  }
+
   /// remove(withIdentifier:) 的契约是:在 queue.operations 中按 name 找到匹配项并
   /// 对其调用 cancel(),找到返回 true、找不到返回 false。
   ///
   /// 用信号量把 operation 钉在"执行中"状态,使它必定还在 queue.operations 里,
-  /// 从而不依赖队列并发宽度(MAX_THREAD_COUNT = 2*activecpu-1,在多核机器上
+  /// 从而不依赖队列并发宽度(maxThreadCount() = 2*activecpu-1,在多核机器上
   /// 高达数十,靠单个 blocker 制造背压是不可靠的)。
   func testRemoveByIdentifierCancelsMatchingOperation() {
     let started = expectation(description: "target 开始执行")
