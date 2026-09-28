@@ -1,6 +1,6 @@
 //
 //  SwiftyAlertView.swift
-//  WHCWSIFT
+//  SwiftyUI
 //
 //  Created by Haochen Wang on 10/30/17.
 //  Copyright © 2017 Haochen Wang. All rights reserved.
@@ -10,11 +10,38 @@ import UIKit
 
 @MainActor
 open class SwiftyAlertButton: UIButton {
-  var action: (() -> Void)!
+  /// 可选而非隐式解包:hideView() 收尾时会把它清空,而同一个实例再次 showTitle
+  /// 时重新上屏的正是这些按钮 —— 隐式解包的调用会在那次点击上 trap。
+  var action: (() -> Void)?
+
+  /// 视觉高度是 35pt(见 layoutContents(in:)),低于 44×44pt 的最小点击目标。
+  /// 这里只把**命中区域**对称扩到至少 44pt,不改视觉:竖排相邻按钮间隔 10pt,
+  /// 上下各扩 4.5pt 不会与邻居重叠。
+  open override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+    minimumHitTargetContains(point)
+  }
+}
+
+/// addTextField() 实际返回的类型。视觉高度是 30pt(见 layoutContents(in:)),
+/// 与按钮同理只把命中区域扩到至少 44pt:文本框之间间隔 15pt,上下各扩 7pt 不会重叠。
+final class SwiftyAlertTextField: UITextField {
+  override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+    minimumHitTargetContains(point)
+  }
+}
+
+extension UIView {
+  /// 以 bounds 为中心、对称扩到至少 44×44pt 之后的区域是否包含 point。
+  fileprivate func minimumHitTargetContains(_ point: CGPoint) -> Bool {
+    let minimum: CGFloat = 44
+    let dx = min(0, (bounds.width - minimum) / 2)
+    let dy = min(0, (bounds.height - minimum) / 2)
+    return bounds.insetBy(dx: dx, dy: dy).contains(point)
+  }
 }
 
 // Allow alerts to be closed/renamed in a chainable manner
-// Example: SwiftyAlertView().showSuccess(self, title: "Test", subTitle: "Value").close()
+// Example: SwiftyAlertView.create().showSuccess("Test", subTitle: "Value").close()
 @MainActor
 public final class SwiftyAlertViewResponder {
   let alertview: SwiftyAlertView
@@ -24,12 +51,16 @@ public final class SwiftyAlertViewResponder {
     self.alertview = alertview
   }
 
+  // 标题与副标题的高度都在布局时按当时的文本算,改完文本必须请求重新布局,
+  // 否则上屏后换成更长的文本会溢出原来的框。
   public func setTitle(_ title: String) {
     self.alertview.labelTitle.text = title
+    self.alertview.view.setNeedsLayout()
   }
 
   public func setSubTitle(_ subTitle: String) {
     self.alertview.viewText.text = subTitle
+    self.alertview.view.setNeedsLayout()
   }
 
   public func close() {
@@ -45,20 +76,17 @@ private let kCircleHeightBackground: CGFloat = 62.0
 private let uniqueTag: Int = Int(arc4random() % UInt32(Int32.max))
 private let uniqueAccessibilityIdentifier: String = "SwiftyAlert"
 
-//public typealias DismissBlock = () -> Void
-
 // The Main Class
 @MainActor
 public final class SwiftyAlertView: UIViewController {
 
-  var appearance: SwiftyAppearance!
+  let appearance: SwiftyAppearance
 
   // UI Colour
   var viewColor = UIColor()
 
   // UI Options
   public var iconTintColor: UIColor?
-  //    open var customSubview : UIView?
 
   // Members declaration
   var baseView = UIView()
@@ -74,6 +102,11 @@ public final class SwiftyAlertView: UIViewController {
   fileprivate var input = [UITextView]()
   internal var buttons = [SwiftyAlertButton]()
   fileprivate var selfReference: SwiftyAlertView?
+  /// 当前是否处于"已上屏、尚未开始收起"的状态。showTitle 的成功分支置 true,
+  /// hideView() 一开始就置 false —— 它据此保证 dismissBlock 每次上屏只回调一次。
+  /// internal 而非 private:单元测试进程没有 key window,走不到 showTitle 的成功分支,
+  /// 测试直接置位来模拟"已上屏"(与 addKeyboardObservers() 开放给测试同一个理由)。
+  var isPresented = false
 
   private init(_ appearance: SwiftyAppearance) {
     self.appearance = appearance
@@ -106,6 +139,8 @@ public final class SwiftyAlertView: UIViewController {
     ]
     view.backgroundColor = UIColor(
       red: 0, green: 0, blue: 0, alpha: appearance.kDefaultShadowOpacity)
+    // 模态遮罩:VoiceOver 焦点不应跑到被遮住的内容上。
+    view.accessibilityViewIsModal = true
     view.addSubview(baseView)
     // Base View
     baseView.frame = view.frame
@@ -162,8 +197,15 @@ public final class SwiftyAlertView: UIViewController {
   override public func viewWillLayoutSubviews() {
     super.viewWillLayoutSubviews()
     guard let rv = SwiftyGlobal.keyWindow else { return }
-    let sz = rv.frame.size
+    layoutContents(in: rv.frame.size)
+  }
 
+  /// 按给定的容器尺寸摆放 alert 的全部子视图。
+  ///
+  /// 从 viewWillLayoutSubviews 里拆出来,只为让单元测试能直接喂一个尺寸:测试进程
+  /// 没有 window scene,viewWillLayoutSubviews 在 keyWindow 守卫处就返回了,
+  /// 布局算术原本完全测不到。internal,对外不可见。
+  func layoutContents(in sz: CGSize) {
     // Set background frame
     view.frame.size = sz
 
@@ -173,9 +215,12 @@ public final class SwiftyAlertView: UIViewController {
     // get actual height of title text
     var titleActualHeight: CGFloat = 0
     if let title = labelTitle.text {
-      titleActualHeight =
-        title.heightWithConstrainedWidth(
-          width: appearance.kWindowWidth - hMargin * 2, font: labelTitle.font) + 10
+      let textHeight = title.heightWithConstrainedWidth(
+        width: appearance.kWindowWidth - hMargin * 2, font: labelTitle.font)
+      // label 自己的高度也按当前文本重算(与 showTitle 里的算法相同)。它曾经只在
+      // showTitle 里设过一次,经 responder 换成更长的标题后,重新布局也还是旧高度。
+      labelTitle.frame.size.height = textHeight
+      titleActualHeight = textHeight + 10
       // get the larger height for the title text
       titleActualHeight =
         (titleActualHeight > appearance.kTitleHeight ? titleActualHeight : appearance.kTitleHeight)
@@ -197,11 +242,10 @@ public final class SwiftyAlertView: UIViewController {
     consumedHeight += appearance.kTextViewdHeight * CGFloat(input.count)
     let maxViewTextHeight = maxHeight - consumedHeight
     let viewTextWidth = appearance.kWindowWidth - hMargin * 2
-    var viewTextHeight = appearance.kTextHeight
 
     let suggestedViewTextSize = viewText.sizeThatFits(
       CGSize(width: viewTextWidth, height: CGFloat.greatestFiniteMagnitude))
-    viewTextHeight = min(suggestedViewTextSize.height, maxViewTextHeight)
+    let viewTextHeight = min(suggestedViewTextSize.height, maxViewTextHeight)
 
     // scroll management
     if suggestedViewTextSize.height > maxViewTextHeight {
@@ -222,52 +266,42 @@ public final class SwiftyAlertView: UIViewController {
       x: x, y: y + appearance.kCircleBackgroundTopPosition, width: kCircleHeightBackground,
       height: kCircleHeightBackground)
 
-    //adjust Title frame based on circularIcon show/hide flag
-    //        let titleOffset : CGFloat = appearance.showCircularIcon ? 0.0 : -12.0
-    let titleOffset: CGFloat = 0
-    labelTitle.frame = labelTitle.frame.offsetBy(dx: 0, dy: titleOffset)
-
     // Subtitle
-    y =
-      titleActualHeight > 0
-      ? appearance.kTitleTop + titleActualHeight + titleOffset : defaultTopOffset
-    viewText.frame = CGRect(
-      x: hMargin, y: y, width: appearance.kWindowWidth - hMargin * 2, height: appearance.kTextHeight
-    )
+    y = titleActualHeight > 0 ? appearance.kTitleTop + titleActualHeight : defaultTopOffset
     viewText.frame = CGRect(x: hMargin, y: y, width: viewTextWidth, height: viewTextHeight)
     // Text fields
     y += viewTextHeight + 14.0
-    for (_, txt) in inputs.enumerated() {
+    for txt in inputs {
       txt.frame = CGRect(x: hMargin, y: y, width: appearance.kWindowWidth - hMargin * 2, height: 30)
       txt.layer.cornerRadius = appearance.fieldCornerRadius
       y += appearance.kTextFieldHeight
     }
-    for (_, txt) in input.enumerated() {
+    for txt in input {
       txt.frame = CGRect(
         x: hMargin, y: y, width: appearance.kWindowWidth - hMargin * 2,
         height: appearance.kTextViewdHeight - hMargin)
-      //txt.layer.cornerRadius = fieldCornerRadius
       y += appearance.kTextViewdHeight
     }
     // Buttons
     let numberOfButton = CGFloat(buttons.count)
-    let buttonsSpace = numberOfButton >= 1 ? CGFloat(10) * (numberOfButton - 1) : 0
-    let widthEachButton = (appearance.kWindowWidth - 24 - buttonsSpace) / numberOfButton
+    let buttonSpacing: CGFloat = 10
+    let totalSpacing = numberOfButton >= 1 ? buttonSpacing * (numberOfButton - 1) : 0
+    let widthEachButton = (appearance.kWindowWidth - 24 - totalSpacing) / numberOfButton
     var buttonX = CGFloat(12)
 
     switch appearance.buttonsLayout {
     case .vertical:
-      for (_, btn) in buttons.enumerated() {
+      for btn in buttons {
         btn.frame = CGRect(x: 12, y: y, width: appearance.kWindowWidth - 24, height: 35)
         btn.layer.cornerRadius = appearance.buttonCornerRadius
         y += appearance.kButtonHeight
       }
     case .horizontal:
-      for (_, btn) in buttons.enumerated() {
+      for btn in buttons {
         btn.frame = CGRect(x: buttonX, y: y, width: widthEachButton, height: 35)
         btn.layer.cornerRadius = appearance.buttonCornerRadius
-        buttonX += widthEachButton
-        buttonX += buttonsSpace
+        // 每个按钮之后只加**一个**间距;曾经加的是总间距,三个按钮起最后一个越界。
+        buttonX += widthEachButton + buttonSpacing
       }
     }
   }
@@ -279,7 +313,7 @@ public final class SwiftyAlertView: UIViewController {
   // NotificationCenter 的 block 形式注册,观察者是 addObserver 返回的 token,
   // self 从未被注册 —— removeObserver(self, name:) 对它们是彻头彻尾的空操作(B21)。
   // 必须把 token 存下来,再逐个 removeObserver(token)。写法照抄
-  // SwiftyThreadPool.memoryWarningObserver(SwiftyThreadPool.swift:44/57/167)
+  // SwiftyThreadPool.memoryWarningObserver(声明、init 里注册、deinit 里按 token 撤销)
   // 与 ImageCachePool.memoryWarningObserver,全库保持同一形状。
   private var keyboardWillShowObserver: (any NSObjectProtocol)?
   private var keyboardWillHideObserver: (any NSObjectProtocol)?
@@ -327,16 +361,26 @@ public final class SwiftyAlertView: UIViewController {
       forName: UIResponder.keyboardWillShowNotification, object: nil, queue: nil
     ) { [weak self] (notification) in
       // Notification 不是 Sendable,不能整个送进 assumeIsolated;
-      // 这里先在闭包自身的隔离域内取出唯一需要的标量(CGFloat 是 Sendable)。
-      let endKeyBoardFrameY =
+      // 这里先在闭包自身的隔离域内取出唯一需要的值(CGRect 是 Sendable)。
+      let keyboardEndFrame =
         (notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?
-        .cgRectValue.minY
+        .cgRectValue
 
       MainActor.assumeIsolated {
         guard let strongSelf = self else { return }
         // 注意顺序:即使拿不到键盘 frame,也要先把标志置位(沿用原行为)
         strongSelf.keyboardHasBeenShown = true
-        guard let endKeyBoardFrame = endKeyBoardFrameY else { return }
+        guard let keyboardEndFrame else { return }
+
+        // 键盘 frame 是屏幕坐标,contentView / circleBG 的 frame 在 baseView 的坐标系里。
+        // 两者只在窗口铺满屏幕时才重合 —— iPad 分屏、台前调度下都不成立,必须先换算。
+        // 不在窗口里时无从换算,沿用原值。
+        let endKeyBoardFrame: CGFloat
+        if let screenSpace = strongSelf.baseView.window?.screen.coordinateSpace {
+          endKeyBoardFrame = strongSelf.baseView.convert(keyboardEndFrame, from: screenSpace).minY
+        } else {
+          endKeyBoardFrame = keyboardEndFrame.minY
+        }
 
         if strongSelf.tmpContentViewFrameOrigin == nil {
           strongSelf.tmpContentViewFrameOrigin = strongSelf.contentView.frame.origin
@@ -421,13 +465,12 @@ public final class SwiftyAlertView: UIViewController {
     if let count = event?.touches(for: view)?.count, count > 0 {
       view.endEditing(true)
     }
+    super.touchesEnded(touches, with: event)
   }
 
   public func addTextField(_ title: String? = nil) -> UITextField {
-    // Update view height
-    appearance.setkWindowHeight(appearance.kWindowHeight + appearance.kTextFieldHeight)
     // Add text field
-    let txt = UITextField()
+    let txt = SwiftyAlertTextField()
     txt.borderStyle = UITextField.BorderStyle.roundedRect
     txt.font = appearance.kTextFont
     txt.autocapitalizationType = UITextAutocapitalizationType.words
@@ -441,8 +484,6 @@ public final class SwiftyAlertView: UIViewController {
   }
 
   public func addTextView() -> UITextView {
-    // Update view height
-    appearance.setkWindowHeight(appearance.kWindowHeight + appearance.kTextViewdHeight)
     // Add text view
     let txt = UITextView()
     txt.font = appearance.kTextFont
@@ -455,7 +496,6 @@ public final class SwiftyAlertView: UIViewController {
 
   @discardableResult
   public func addButton(_ title: String, action: @escaping () -> Void) -> SwiftyAlertButton {
-    appearance.setkWindowHeight(appearance.kWindowHeight + appearance.kButtonHeight)
     // Add button
     let btn = SwiftyAlertButton()
     btn.layer.masksToBounds = true
@@ -479,7 +519,7 @@ public final class SwiftyAlertView: UIViewController {
 
   @objc
   func buttonTapped(_ btn: SwiftyAlertButton) {
-    btn.action()
+    btn.action?()
     if self.view.alpha != 0.0 && appearance.shouldAutoDismiss { hideView() }
   }
 
@@ -514,7 +554,7 @@ public final class SwiftyAlertView: UIViewController {
     }
   }
 
-  // showSuccess(view, title, subTitle)
+  // showSuccess(title, subTitle)
   @discardableResult
   public func showSuccess(
     _ title: String, subTitle: String,
@@ -526,7 +566,7 @@ public final class SwiftyAlertView: UIViewController {
       colorTextButton: colorTextButton, circleIconImage: circleIconImage)
   }
 
-  // showError(view, title, subTitle)
+  // showError(title, subTitle)
   @discardableResult
   public func showError(
     _ title: String, subTitle: String,
@@ -538,7 +578,7 @@ public final class SwiftyAlertView: UIViewController {
       colorTextButton: colorTextButton, circleIconImage: circleIconImage)
   }
 
-  // showWarning(view, title, subTitle)
+  // showWarning(title, subTitle)
   @discardableResult
   public func showWarning(
     _ title: String, subTitle: String,
@@ -550,7 +590,7 @@ public final class SwiftyAlertView: UIViewController {
       colorTextButton: colorTextButton, circleIconImage: circleIconImage)
   }
 
-  // showInfo(view, title, subTitle)
+  // showInfo(title, subTitle)
   @discardableResult
   public func showInfo(
     _ title: String, subTitle: String, colorStyle: UInt = SwiftyAlertViewStyle.info.defaultColorInt,
@@ -571,10 +611,14 @@ public final class SwiftyAlertView: UIViewController {
       colorTextButton: colorTextButton, circleIconImage: circleIconImage)
   }
 
-  // showTitle(view, title, subTitle, timeout, style)
+  // showTitle(title, subTitle, style)
+  //
+  // colorStyle 默认 nil,即取 style.defaultColorInt。它曾默认为 0x000000:
+  // `?? style.defaultColorInt` 只在显式传 nil 时才生效,直接调 showTitle(…, style: .success)
+  // 得到的是黑色圆圈和按钮。
   @discardableResult
   public func showTitle(
-    _ title: String, subTitle: String, style: SwiftyAlertViewStyle, colorStyle: UInt? = 0x000000,
+    _ title: String, subTitle: String, style: SwiftyAlertViewStyle, colorStyle: UInt? = nil,
     colorTextButton: UInt? = 0xFFFFFF, circleIconImage: UIImage? = nil
   ) -> SwiftyAlertViewResponder {
     view.alpha = 0
@@ -585,7 +629,7 @@ public final class SwiftyAlertView: UIViewController {
     // 而它只在 hideView() 的 completion 里被清空 —— 提前 return 的分支永远到不了那里。
     // 1.x 这条路径是 `UIApplication.shared.keyWindow!` 的无条件崩溃,泄漏因此不可能
     // 存在;加固 B1 时若照搬原来的语句顺序,等于把崩溃换成了永久泄漏。
-    // 参照 SwiftyToast 同一形状的守卫(SwiftyToast.swift:80-83):提前返回前先把
+    // 参照 SwiftyToast.show() 里同一形状的 `guard let window` 守卫:提前返回前先把
     // 自身的残留引用交代干净。
     guard let rv = SwiftyGlobal.keyWindow else {
       // 无可用窗口时不展示,仍返回 responder 以维持签名。
@@ -594,6 +638,7 @@ public final class SwiftyAlertView: UIViewController {
       return SwiftyAlertViewResponder(alertview: self)
     }
     selfReference = self
+    isPresented = true
     // 展示开始,挂上键盘观察者;由 hideView() 撤销。两者构成本类型显式的
     // 展示生命周期,详见 addKeyboardObservers() 的说明。
     addKeyboardObservers()
@@ -602,39 +647,18 @@ public final class SwiftyAlertView: UIViewController {
     baseView.frame = rv.bounds
 
     // Alert colour/icon
-    viewColor = UIColor()
-    var iconImage: UIImage?
-    let colorInt = colorStyle ?? style.defaultColorInt
-    viewColor = UIColor.hex(colorInt)
+    viewColor = UIColor.hex(colorStyle ?? style.defaultColorInt)
 
     // Icon style
+    let defaultIcon: UIImage
     switch style {
-    case .success:
-
-      iconImage = checkCircleIconImage(
-        circleIconImage, defaultImage: SwiftyAlertViewStyleKit.imageOfCheckmark)
-
-    case .error:
-
-      iconImage = checkCircleIconImage(
-        circleIconImage, defaultImage: SwiftyAlertViewStyleKit.imageOfCross)
-
-    case .warning:
-
-      iconImage = checkCircleIconImage(
-        circleIconImage, defaultImage: SwiftyAlertViewStyleKit.imageOfWarning)
-
-    case .info:
-
-      iconImage = checkCircleIconImage(
-        circleIconImage, defaultImage: SwiftyAlertViewStyleKit.imageOfInfo)
-
-    case .edit:
-
-      iconImage = checkCircleIconImage(
-        circleIconImage, defaultImage: SwiftyAlertViewStyleKit.imageOfEdit)
-
+    case .success: defaultIcon = SwiftyAlertViewStyleKit.imageOfCheckmark
+    case .error: defaultIcon = SwiftyAlertViewStyleKit.imageOfCross
+    case .warning: defaultIcon = SwiftyAlertViewStyleKit.imageOfWarning
+    case .info: defaultIcon = SwiftyAlertViewStyleKit.imageOfInfo
+    case .edit: defaultIcon = SwiftyAlertViewStyleKit.imageOfEdit
     }
+    let iconImage = checkCircleIconImage(circleIconImage, defaultImage: defaultIcon)
 
     // Title
     if !title.isEmpty {
@@ -646,20 +670,9 @@ public final class SwiftyAlertView: UIViewController {
     }
 
     // Subtitle
+    // 副标题框的尺寸在 layoutContents(in:) 里按内容算,这里只设文本。
     if !subTitle.isEmpty {
       viewText.text = subTitle
-      // Adjust text view size, if necessary
-      let str = subTitle as NSString
-      let attr = [NSAttributedString.Key.font: viewText.font ?? UIFont()]
-      let sz = CGSize(width: appearance.kWindowWidth - 24, height: 90)
-      let r = str.boundingRect(
-        with: sz, options: NSStringDrawingOptions.usesLineFragmentOrigin, attributes: attr,
-        context: nil)
-      let ht = ceil(r.size.height)
-      if ht < appearance.kTextHeight {
-        appearance.kWindowHeight -= (appearance.kTextHeight - ht)
-        appearance.setkTextHeight(ht)
-      }
     }
 
     //hidden/show circular view based on the ui option
@@ -669,28 +682,26 @@ public final class SwiftyAlertView: UIViewController {
     // Alert view colour and images
     circleView.backgroundColor = viewColor
 
-    if let iconTintColor = iconTintColor {
-      circleIconView = UIImageView(image: iconImage!.withRenderingMode(.alwaysTemplate))
-      circleIconView?.tintColor = iconTintColor
-    } else {
-      circleIconView = UIImageView(image: iconImage!)
-    }
+    let iconView = UIImageView(
+      image: iconTintColor == nil ? iconImage : iconImage.withRenderingMode(.alwaysTemplate))
+    iconView.tintColor = iconTintColor
+    circleIconView = iconView
 
-    circleView.addSubview(circleIconView!)
+    circleView.addSubview(iconView)
     let x = (appearance.kCircleHeight - appearance.kCircleIconHeight) / 2
-    circleIconView!.frame = CGRect(
+    iconView.frame = CGRect(
       x: x, y: x, width: appearance.kCircleIconHeight, height: appearance.kCircleIconHeight)
-    circleIconView?.layer.masksToBounds = true
+    iconView.layer.masksToBounds = true
 
-    for (_, txt) in inputs.enumerated() {
+    for txt in inputs {
       txt.layer.borderColor = viewColor.cgColor
     }
 
-    for (_, txt) in input.enumerated() {
+    for txt in input {
       txt.layer.borderColor = viewColor.cgColor
     }
 
-    for (_, btn) in buttons.enumerated() {
+    for btn in buttons {
       btn.backgroundColor = viewColor
       btn.setTitleColor(UIColor.hex(colorTextButton ?? 0xFFFFFF), for: UIControl.State())
     }
@@ -733,21 +744,6 @@ public final class SwiftyAlertView: UIViewController {
       })
   }
 
-  // DynamicAnimator function
-  var animator: UIDynamicAnimator?
-  var snapBehavior: UISnapBehavior?
-
-  fileprivate func animate(item: UIView, center: CGPoint) {
-    if let snapBehavior = self.snapBehavior {
-      self.animator?.removeBehavior(snapBehavior)
-    }
-
-    self.animator = UIDynamicAnimator.init(referenceView: self.view)
-    let tempSnapBehavior = UISnapBehavior.init(item: item, snapTo: center)
-    self.animator?.addBehavior(tempSnapBehavior)
-    self.snapBehavior? = tempSnapBehavior
-  }
-
   // Close SwiftyAlertView
   @objc
   public func hideView() {
@@ -756,6 +752,11 @@ public final class SwiftyAlertView: UIViewController {
     // 完成回调因故没跑到,撤销也已经发生 —— 注册与撤销必须在每条路径上成对。
     // 可重复调用,重复 hideView() 是安全的。
     removeKeyboardObservers()
+
+    // 从未上屏(无窗口时 showTitle 提前返回),或已经在收起:到此为止。
+    // 否则 dismissBlock 会为一次根本没发生的展示回调,或为一次收起回调两次。
+    guard isPresented else { return }
+    isPresented = false
 
     UIView.animate(
       withDuration: 0.2,
@@ -769,7 +770,7 @@ public final class SwiftyAlertView: UIViewController {
         }
 
         // This is necessary for SwiftyAlertView to be de-initialized, preventing a strong reference cycle with the viewcontroller calling SwiftyAlertView.
-        for (_, button) in self.buttons.enumerated() {
+        for button in self.buttons {
           button.action = nil
         }
 
@@ -789,7 +790,7 @@ public final class SwiftyAlertView: UIViewController {
   //Return true if a SwiftyAlertView is already being shown, false otherwise
   public func isShowing() -> Bool {
     if let subviews = SwiftyGlobal.keyWindow?.subviews {
-      for (_, view) in subviews.enumerated() {
+      for view in subviews {
         if view.tag == uniqueTag && view.accessibilityIdentifier == uniqueAccessibilityIdentifier {
           return true
         }

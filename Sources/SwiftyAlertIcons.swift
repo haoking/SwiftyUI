@@ -217,45 +217,20 @@ final class SwiftyAlertViewStyleKit: NSObject {
   // 5 个图标改为惰性 static let(原来是可变的 Cache.imageOf* + 计算属性)。
   // Swift 保证 static let 的初始化只执行一次且线程安全(经 swift_once),
   // 不需要额外加锁或 @MainActor 标注就能安全地被多线程访问。
-  static let imageOfCheckmark: UIImage = {
-    UIGraphicsBeginImageContextWithOptions(CGSize(width: 80, height: 80), false, 0)
-    SwiftyAlertViewStyleKit.drawCheckmark()
-    let image = UIGraphicsGetImageFromCurrentImageContext()!
-    UIGraphicsEndImageContext()
-    return image
-  }()
+  static let imageOfCheckmark: UIImage = UIImage.render(
+    size: CGSize(width: 80, height: 80), opaque: false, SwiftyAlertViewStyleKit.drawCheckmark)
 
-  static let imageOfCross: UIImage = {
-    UIGraphicsBeginImageContextWithOptions(CGSize(width: 80, height: 80), false, 0)
-    SwiftyAlertViewStyleKit.drawCross()
-    let image = UIGraphicsGetImageFromCurrentImageContext()!
-    UIGraphicsEndImageContext()
-    return image
-  }()
+  static let imageOfCross: UIImage = UIImage.render(
+    size: CGSize(width: 80, height: 80), opaque: false, SwiftyAlertViewStyleKit.drawCross)
 
-  static let imageOfWarning: UIImage = {
-    UIGraphicsBeginImageContextWithOptions(CGSize(width: 80, height: 80), false, 0)
-    SwiftyAlertViewStyleKit.drawWarning()
-    let image = UIGraphicsGetImageFromCurrentImageContext()!
-    UIGraphicsEndImageContext()
-    return image
-  }()
+  static let imageOfWarning: UIImage = UIImage.render(
+    size: CGSize(width: 80, height: 80), opaque: false, SwiftyAlertViewStyleKit.drawWarning)
 
-  static let imageOfInfo: UIImage = {
-    UIGraphicsBeginImageContextWithOptions(CGSize(width: 80, height: 80), false, 0)
-    SwiftyAlertViewStyleKit.drawInfo()
-    let image = UIGraphicsGetImageFromCurrentImageContext()!
-    UIGraphicsEndImageContext()
-    return image
-  }()
+  static let imageOfInfo: UIImage = UIImage.render(
+    size: CGSize(width: 80, height: 80), opaque: false, SwiftyAlertViewStyleKit.drawInfo)
 
-  static let imageOfEdit: UIImage = {
-    UIGraphicsBeginImageContextWithOptions(CGSize(width: 80, height: 80), false, 0)
-    SwiftyAlertViewStyleKit.drawEdit()
-    let image = UIGraphicsGetImageFromCurrentImageContext()!
-    UIGraphicsEndImageContext()
-    return image
-  }()
+  static let imageOfEdit: UIImage = UIImage.render(
+    size: CGSize(width: 80, height: 80), opaque: false, SwiftyAlertViewStyleKit.drawEdit)
 }
 
 extension String {

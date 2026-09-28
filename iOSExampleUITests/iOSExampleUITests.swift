@@ -132,7 +132,7 @@ final class iOSExampleUITests: XCTestCase {
   /// SwiftyAlertViewStyle.defaultColorInt 的五个取值(Sources/SwiftyAlertStyle.swift)。
   /// 这里不 import SwiftyUI:UI 测试 bundle 不链接被测框架,照抄常量并在此注明出处。
   private static let styleColors: [(name: String, rgb: (r: Int, g: Int, b: Int))] = [
-    ("success", (0x22, 0xB5, 0x73)),
+    ("success", (0x19, 0x87, 0x54)),
     ("error", (0xC1, 0x27, 0x2D)),
     ("warning", (0xFF, 0xD1, 0x10)),
     ("info", (0x28, 0x66, 0xBF)),
@@ -186,7 +186,7 @@ final class iOSExampleUITests: XCTestCase {
     XCTAssertTrue(app.buttons["Second Button"].exists)
     XCTAssertTrue(app.textFields.firstMatch.exists, "addTextField() 的输入框没出现")
 
-    // success 样式:按钮底色应当是 SwiftyAlertViewStyle.success 的 0x22B573。
+    // success 样式:按钮底色应当是 SwiftyAlertViewStyle.success 的 0x198754。
     // 取按钮左端(标题文字居中,左端是纯色填充),再看它最接近五种样式里的哪一种。
     let button = app.buttons["First Button"].frame
     let sample = CGPoint(x: button.minX + 8, y: button.midY)
@@ -196,7 +196,7 @@ final class iOSExampleUITests: XCTestCase {
     XCTAssertEqual(
       nearestStyleName(to: color), "success",
       "alert 不是 success 样式:在 \(sample) 取到 rgb\(color),"
-        + "而 success 应为 rgb(34, 181, 115)")
+        + "而 success 应为 rgb(25, 135, 84)")
   }
 
   // MARK: - 验收行:三次快速点击只触发一次(SwiftyButton 防抖)

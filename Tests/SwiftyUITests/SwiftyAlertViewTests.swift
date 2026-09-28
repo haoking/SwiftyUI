@@ -115,6 +115,31 @@ final class SwiftyAlertViewTests: XCTestCase {
       "hideView() 之后观察者已撤销,keyboardHasBeenShown 不应被置位")
   }
 
+  /// 窗口不在屏幕原点时(iPad 分屏、台前调度),键盘避让也要算对。
+  ///
+  /// 键盘的 end frame 是**屏幕**坐标,contentView / circleBG 的 frame 在 baseView 的坐标系里。
+  /// 曾经两者直接相减,只在窗口铺满屏幕时才恰好正确。
+  ///
+  /// 夹具:窗口原点在屏幕 (0, 100);键盘顶端在屏幕 y = 500,换到窗口里是 y = 400,
+  /// 遮住 contentView(maxY = 600)底部 200pt。
+  ///
+  /// 判别力:去掉坐标换算,位移只有 600 − 500 = 100,本测试变红。
+  func testKeyboardAvoidanceConvertsFromScreenCoordinates() {
+    let window = UIWindow(frame: CGRect(x: 0, y: 100, width: 390, height: 700))
+    window.isHidden = false
+    let alert = makeShowingAlert()
+    defer { alert.hideView() }
+    alert.view.frame = window.bounds
+    alert.baseView.frame = alert.view.bounds
+    window.addSubview(alert.view)
+
+    postKeyboardWillShow()
+
+    XCTAssertEqual(
+      alert.contentView.frame.origin.y, Self.contentFrame.origin.y - 200, accuracy: 0.5,
+      "键盘 frame 必须先从屏幕坐标换到 baseView 的坐标系再算遮挡")
+  }
+
   /// 注册点不再是外观回调。
   ///
   /// 注意这条锁定的**不是**"外观回调不触发"——实测它们会触发(见类型注释)。
@@ -269,6 +294,206 @@ final class SwiftyAlertViewTests: XCTestCase {
     responder.setTitle("改过的标题")
     XCTAssertEqual(alert.labelTitle.text, "改过的标题")
     XCTAssertFalse(alert.isShowing())
+  }
+
+  // MARK: - 收起之后的按钮
+
+  /// hideView() 收尾时会把每个按钮的 action 清空(打破调用方与 alert 之间的引用环);
+  /// 此后再点这些按钮不能崩溃。
+  ///
+  /// 这不是凭空构造的状态:同一个实例可以再次 showTitle(见 addKeyboardObservers()
+  /// 的说明),而 showTitle 不会重建按钮,也不会恢复 action —— 重新上屏的正是这些
+  /// action 已被清空的按钮。action 曾是隐式解包可选值,`buttonTapped` 里的
+  /// `btn.action()` 因此直接 trap。showTitle 的成功分支在单元测试里走不到
+  /// (没有 key window),这里直接驱动收起之后的那一次点击。
+  ///
+  /// 判别力:把 action 改回 `(() -> Void)!`、调用改回 `btn.action()`,测试进程崩溃。
+  func testTappingButtonAfterDismissalDoesNotCrash() {
+    let alert = SwiftyAlertView.create()
+    let button = alert.addButton("OK") {}
+
+    alert.isPresented = true  // 模拟 showTitle 的成功分支(本进程没有 key window)
+    alert.hideView()
+    // 收起动画在无窗口时下一轮 RunLoop 就结束,completion 里清空 action
+    let deadline = Date().addingTimeInterval(3.0)
+    while button.action != nil && Date() < deadline {
+      RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+    }
+    XCTAssertNil(button.action, "前提:hideView() 的收尾已清空 action,否则本测试无判别力")
+
+    alert.buttonTapped(button)
+  }
+
+  /// 按钮的视觉高度是 35pt(viewWillLayoutSubviews 里写死),命中区域必须至少 44pt 高,
+  /// 达到 44×44pt 的最小点击目标。
+  ///
+  /// 只扩命中区、不改视觉。竖排时相邻按钮间隔 10pt(步长 kButtonHeight = 45),上下各扩
+  /// 4.5pt 不会与邻居重叠 —— 最后一条断言锁住这个上限。
+  ///
+  /// 判别力:删掉 SwiftyAlertButton 的 point(inside:with:) 覆写,前两条断言失败。
+  func testAlertButtonHitAreaMeetsMinimumTouchTarget() {
+    let alert = SwiftyAlertView.create()
+    let button = alert.addButton("OK") {}
+    button.frame = CGRect(x: 12, y: 100, width: 216, height: 35)
+
+    XCTAssertTrue(button.point(inside: CGPoint(x: 108, y: -4.4), with: nil), "上沿之外 4.4pt 应仍可点中")
+    XCTAssertTrue(button.point(inside: CGPoint(x: 108, y: 39.4), with: nil), "下沿之外 4.4pt 应仍可点中")
+    XCTAssertFalse(
+      button.point(inside: CGPoint(x: 108, y: -5), with: nil), "命中区不应扩出 44pt,以免侵入相邻按钮")
+  }
+
+  // MARK: - dismissBlock
+
+  /// dismissBlock 每次上屏只回调一次;从未上屏的 alert 不回调。
+  ///
+  /// hideView() 曾经不看任何状态:无窗口时 showTitle 提前返回、根本没上屏的 alert,
+  /// close() 照样回调 dismissBlock;连续 close() 两次则回调两次。把 dismissBlock
+  /// 当作"关掉了一次"的调用方会误计数或重复执行收尾。
+  ///
+  /// 判别力:删掉 hideView() 里的 `guard isPresented`,两条断言分别得到 1 和 2。
+  func testDismissBlockFiresOncePerPresentation() {
+    let neverShown = SwiftyAlertView.create()
+    let neverShownCount = Box(0)
+    neverShown.showTitle("标题", subTitle: "副标题", style: .info)  // 无窗口:提前返回,未上屏
+      .setDismissBlock { neverShownCount.value += 1 }
+    neverShown.hideView()
+
+    let shown = SwiftyAlertView.create()
+    shown.isPresented = true  // 模拟 showTitle 的成功分支(本进程没有 key window)
+    let shownCount = Box(0)
+    shown.dismissBlock = { shownCount.value += 1 }
+    shown.hideView()
+    shown.hideView()
+
+    RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+    XCTAssertEqual(neverShownCount.value, 0, "从未上屏的 alert 不应回调 dismissBlock")
+    XCTAssertEqual(shownCount.value, 1, "一次上屏只应回调一次 dismissBlock")
+  }
+
+  /// 经 responder 改标题 / 副标题之后,alert 必须请求重新布局。
+  ///
+  /// 标题与副标题的高度都在布局时按当时的文本算(见 layoutContents(in:))。
+  /// responder 曾经只改文本、不请求布局,上屏后换成更长的文本会溢出原来的框。
+  ///
+  /// 判别力:删掉 responder 里的 setNeedsLayout(),两条主断言都失败。
+  func testResponderTextChangesRequestRelayout() {
+    let alert = SwiftyAlertView.create()
+    let responder = SwiftyAlertViewResponder(alertview: alert)
+    alert.view.layoutIfNeeded()
+    XCTAssertFalse(alert.view.layer.needsLayout(), "前提:布局已经做过一次,否则本测试无判别力")
+
+    responder.setTitle("一个明显更长、需要折行的标题")
+    XCTAssertTrue(alert.view.layer.needsLayout(), "改标题后必须请求重新布局")
+
+    alert.view.layoutIfNeeded()
+    responder.setSubTitle("一段明显更长、需要折行的副标题")
+    XCTAssertTrue(alert.view.layer.needsLayout(), "改副标题后必须请求重新布局")
+  }
+
+  /// 重新布局时,标题 label 自己的高度也要按当前文本重算。
+  ///
+  /// 标题 label 的高度曾经只在 showTitle 里设过一次;布局时虽然按新标题算了高度、
+  /// 把副标题往下挪,label 本身却还是旧高度,多出来的行被截断。
+  ///
+  /// 判别力:删掉 layoutContents(in:) 里对 labelTitle 高度的赋值,两次高度相同。
+  func testRelayoutResizesTitleLabelToCurrentText() {
+    let alert = SwiftyAlertView.create()
+    let responder = SwiftyAlertViewResponder(alertview: alert)
+    let size = CGSize(width: 402, height: 874)
+
+    responder.setTitle("短")
+    alert.layoutContents(in: size)
+    let oneLine = alert.labelTitle.frame.height
+
+    responder.setTitle(String(repeating: "一个需要折成好几行的很长的标题", count: 3))
+    alert.layoutContents(in: size)
+
+    XCTAssertGreaterThan(
+      alert.labelTitle.frame.height, oneLine * 2, "标题变成多行后,label 的高度必须随之增长")
+  }
+
+  // MARK: - 布局(经 layoutContents(in:) 直接喂尺寸)
+
+  /// 横排的按钮必须都落在 contentView 之内,左右边距与相邻间距一致。
+  ///
+  /// 横排布局曾在每个按钮之后加上 buttonsSpace —— 那是**总**间距 10×(n−1),
+  /// 不是单个间距 10。两个按钮时两者相等所以看不出来;三个按钮起间距翻倍,
+  /// 最后一个按钮越出 contentView,被 masksToBounds 裁掉。
+  ///
+  /// 判别力:改回 `buttonX += buttonsSpace`,三个按钮时最后一个的右缘在 248 > 240。
+  func testHorizontalButtonsStayInsideContentView() {
+    let alert = SwiftyAlertView.create(SwiftyAlertView.SwiftyAppearance(buttonsLayout: .horizontal))
+    for title in ["A", "B", "C"] { alert.addButton(title) {} }
+
+    alert.layoutContents(in: CGSize(width: 402, height: 874))
+
+    let content = alert.contentView.bounds
+    for (index, button) in alert.buttons.enumerated() {
+      XCTAssertTrue(
+        content.contains(button.frame),
+        "第 \(index) 个按钮越出了 contentView(\(button.frame),容器 \(content))")
+    }
+    let last = try! XCTUnwrap(alert.buttons.last)
+    XCTAssertEqual(content.maxX - last.frame.maxX, 12, accuracy: 0.5, "右边距应与左边距同为 12pt")
+    for (left, right) in zip(alert.buttons, alert.buttons.dropFirst()) {
+      XCTAssertEqual(right.frame.minX - left.frame.maxX, 10, accuracy: 0.5, "相邻按钮间距应为 10pt")
+    }
+  }
+
+  /// 文本框的视觉高度是 30pt,命中区域同样必须至少 44pt 高。
+  ///
+  /// 与按钮同一个做法:只扩命中区,不改视觉。文本框之间的步长是 kTextFieldHeight(45),
+  /// 间隔 15pt,上下各扩 7pt 不会与相邻文本框重叠 —— 最后一条断言锁住上限。
+  ///
+  /// 判别力:让 addTextField() 返回普通 UITextField,前两条断言失败。
+  func testAlertTextFieldHitAreaMeetsMinimumTouchTarget() {
+    let alert = SwiftyAlertView.create()
+    let field = alert.addTextField()
+    field.frame = CGRect(x: 12, y: 100, width: 216, height: 30)
+
+    XCTAssertTrue(field.point(inside: CGPoint(x: 108, y: -6.9), with: nil), "上沿之外 6.9pt 应仍可点中")
+    XCTAssertTrue(field.point(inside: CGPoint(x: 108, y: 36.9), with: nil), "下沿之外 6.9pt 应仍可点中")
+    XCTAssertFalse(
+      field.point(inside: CGPoint(x: 108, y: -7.5), with: nil), "命中区不应扩出 44pt,以免侵入相邻文本框")
+  }
+
+  /// alert 是模态遮罩,VoiceOver 焦点不能跑到它后面的内容上。
+  ///
+  /// 判别力:删掉 setup() 里的 accessibilityViewIsModal = true,本断言失败。
+  func testAlertRootViewIsAccessibilityModal() {
+    XCTAssertTrue(SwiftyAlertView.create().view.accessibilityViewIsModal)
+  }
+
+  /// 五种样式的默认配色,按钮文字与按钮底色的对比度都必须达到 WCAG AA(正文 4.5:1)。
+  ///
+  /// 按钮字体是 14pt 粗体,不算 WCAG 的"大字",适用 4.5:1。圆圈里的图标与按钮同色、
+  /// 同为白色(warning 为深灰),因此也一并满足非文本 3:1。文字色取各 showXxx 的默认参数
+  /// (warning 为黑,其余为白)。success 曾是 #22B573,白字只有 2.65:1。
+  ///
+  /// 判别力:把 success 改回 0x22B573,本测试报出 2.65。
+  func testDefaultStyleColorsMeetContrastMinimum() {
+    let defaultTextColors: [(SwiftyAlertViewStyle, UInt)] = [
+      (.success, 0xFFFFFF), (.error, 0xFFFFFF), (.warning, 0x000000), (.info, 0xFFFFFF),
+      (.edit, 0xFFFFFF),
+    ]
+    for (style, text) in defaultTextColors {
+      let ratio = Self.contrastRatio(style.defaultColorInt, text)
+      XCTAssertGreaterThanOrEqual(
+        ratio, 4.5, "\(style) 的按钮文字对比度只有 \(String(format: "%.2f", ratio)):1")
+    }
+  }
+
+  /// WCAG 2.x 的对比度:(较亮的相对亮度 + 0.05) / (较暗的 + 0.05)。
+  private static func contrastRatio(_ a: UInt, _ b: UInt) -> Double {
+    func luminance(_ hex: UInt) -> Double {
+      func channel(_ value: UInt) -> Double {
+        let c = Double(value & 0xFF) / 255
+        return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)
+      }
+      return 0.2126 * channel(hex >> 16) + 0.7152 * channel(hex >> 8) + 0.0722 * channel(hex)
+    }
+    let (la, lb) = (luminance(a), luminance(b))
+    return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
   }
 
   // MARK: - UIScreen.main 回归

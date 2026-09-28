@@ -6,7 +6,9 @@ public enum SwiftyAlertViewStyle {
   public var defaultColorInt: UInt {
     switch self {
     case .success:
-      return 0x22B573
+      // 曾是 0x22B573:白字与白色对勾在它上面只有 2.65:1,低于 WCAG AA。
+      // 0x198754 与白色为 4.53:1,文字(4.5:1)与图标(3:1)都达标。
+      return 0x198754
     case .error:
       return 0xC1272D
     case .warning:
@@ -35,8 +37,6 @@ extension SwiftyAlertView {
     let kTitleHeight: CGFloat
     let kTitleMinimumScaleFactor: CGFloat
     let kWindowWidth: CGFloat
-    var kWindowHeight: CGFloat
-    var kTextHeight: CGFloat
     let kTextFieldHeight: CGFloat
     let kTextViewdHeight: CGFloat
     let kButtonHeight: CGFloat
@@ -52,7 +52,6 @@ extension SwiftyAlertView {
 
     // UI Options
     var disableTapGesture: Bool
-    //        var showCloseButton: Bool
     var showCircularIcon: Bool
     var shouldAutoDismiss: Bool  // Set this false to 'Disable' Auto hideView when SwiftyAlertButton is tapped
     var contentViewCornerRadius: CGFloat
@@ -63,6 +62,9 @@ extension SwiftyAlertView {
     // Actions
     var hideWhenBackgroundViewIsTapped: Bool
 
+    /// - Note: `kWindowHeight`、`kTextHeight` 与 `dynamicAnimatorActive` 不起作用:alert 的
+    ///   整体高度与副标题框的高度都在布局时按内容计算(见 SwiftyAlertView.layoutContents(in:)),
+    ///   动力学动画从未接线。这三个参数只为源码兼容而保留,下一个大版本移除。
     public init(
       kDefaultShadowOpacity: CGFloat = 0.7, kCircleTopPosition: CGFloat = 0.0,
       kCircleBackgroundTopPosition: CGFloat = 6.0, kCircleHeight: CGFloat = 56.0,
@@ -87,8 +89,6 @@ extension SwiftyAlertView {
       self.kTitleTop = kTitleTop
       self.kTitleHeight = kTitleHeight
       self.kWindowWidth = kWindowWidth
-      self.kWindowHeight = kWindowHeight
-      self.kTextHeight = kTextHeight
       self.kTextFieldHeight = kTextFieldHeight
       self.kTextViewdHeight = kTextViewdHeight
       self.kButtonHeight = kButtonHeight
@@ -112,14 +112,6 @@ extension SwiftyAlertView {
       self.hideWhenBackgroundViewIsTapped = hideWhenBackgroundViewIsTapped
       self.buttonsLayout = buttonsLayout
 
-    }
-
-    mutating func setkWindowHeight(_ kWindowHeight: CGFloat) {
-      self.kWindowHeight = kWindowHeight
-    }
-
-    mutating func setkTextHeight(_ kTextHeight: CGFloat) {
-      self.kTextHeight = kTextHeight
     }
   }
 }
