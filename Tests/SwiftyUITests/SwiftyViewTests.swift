@@ -43,6 +43,18 @@ final class SwiftyViewTests: XCTestCase {
     XCTAssertTrue(view.isOpaque)
   }
 
+  /// 图案色的透明度无从得知,背景是图案色时不能声称不透明。
+  ///
+  /// updateOpaque 曾用 `alphaValue` 判断,而 rgba() 对图案色(只有 1 个分量)回落成
+  /// alpha = 1:一张全透明图片做成的图案背景,也被标成了 opaque。
+  ///
+  /// 判别力:改回 `alphaValue == 1.0` 的判断,本断言失败。
+  func testOpaqueIsFalseForPatternBackground() {
+    let view = SwiftyView()
+    view.backgroundColor = UIColor(patternImage: TestSupport.makeSolidImage(color: .clear))
+    XCTAssertFalse(view.isOpaque)
+  }
+
   /// B15:未显式开启全局优化时,库不应改写普通 UIView 的 isOpaque。
   ///
   /// 判别力的关键是用**半透明**背景色:UIView 的 isOpaque 系统默认为 true

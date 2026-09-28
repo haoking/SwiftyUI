@@ -1,6 +1,6 @@
 //
 //  SwiftyView.swift
-//  WHCWSIFT
+//  SwiftyUI
 //
 //  Created by Haochen Wang on 9/26/17.
 //  Copyright © 2017 Haochen Wang. All rights reserved.
@@ -48,7 +48,9 @@ extension UIView {
   /// 完全不透明的视图可以让合成器跳过混合。保持 public 且留在本扩展中:
   /// ImageSettable.applyBackgroundImage(_:) 依赖它。
   public final func updateOpaque() {
-    if let color = backgroundColor, color.alphaValue == 1.0, alpha == 1.0 {
+    // 图案色的透明度无从得知(rgba() 对它回落成 alpha = 1),按不透明性未知处理;
+    // alpha 读 CGColor 自己的值,对任何色彩空间都有定义。
+    if let color = backgroundColor?.cgColor, color.pattern == nil, color.alpha == 1.0, alpha == 1.0 {
       isOpaque = true
     } else {
       isOpaque = false

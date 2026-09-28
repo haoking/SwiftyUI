@@ -1,6 +1,6 @@
 //
 //  TextEditable.swift
-//  WHCWSIFT
+//  SwiftyUI
 //
 //  Created by Haochen Wang on 9/30/17.
 //  Copyright © 2017 Haochen Wang. All rights reserved.

@@ -1,6 +1,6 @@
 //
 //  SwiftyToast.swift
-//  WHCWSIFT
+//  SwiftyUI
 //
 //  Created by Haochen Wang on 10/17/17.
 //  Copyright © 2017 Haochen Wang. All rights reserved.
@@ -36,10 +36,7 @@ public final class SwiftyToast {
     toastLabel.clipsToBounds = true
     toastLabel.padding = 5.0
     toastLabel.font = .systemFont(ofSize: 12)
-    // SwiftyLabel 是 UIView 子类、文本由 TextKit 自绘,不像 UILabel 那样自带
-    // 无障碍暴露 —— 不设这几项,toast 对 VoiceOver 完全是一块沉默的色块。
-    toastLabel.isAccessibilityElement = true
-    toastLabel.accessibilityTraits = .staticText
+    // SwiftyLabel 默认就是静态文本无障碍元素、label 取文本;这里只设外部识别用的标识。
     toastLabel.accessibilityIdentifier = Self.accessibilityIdentifier
     // 已经挂在屏幕上的 toast 也要跟着旋转走。窗口 bounds 一变,autoresizing
     // 就按这份 mask 重新分配边距:宽度差由左右两条**同样大**的柔性边距平分
@@ -63,15 +60,8 @@ public final class SwiftyToast {
   public init(_ text: String) {
     // 只配置文本,**不算帧**:帧要等到 show() 真正拿到窗口时再算,理由见 layoutView。
     toastLabel.text = text
-    toastLabel.accessibilityLabel = text
     SwiftyToastCenter.default.add(self).fire()
   }
-
-  //    @discardableResult
-  //    public class func load(_ text: String) -> SwiftyToast
-  //    {
-  //        return .init(text: text)
-  //    }
 
   /// 按**显示这一刻**的窗口几何算出 toast 的位置与大小。
   ///
@@ -131,6 +121,9 @@ public final class SwiftyToast {
       self.layoutView(in: window)
       self.toastLabel.alpha = 0
       window.addSubview(self.toastLabel)
+      // toast 不会拿到 VoiceOver 焦点(alert 同时在屏时还被它的模态属性挡住),
+      // 不播报的话读屏用户根本不知道它出现过。没开 VoiceOver 时这是空操作。
+      UIAccessibility.post(notification: .announcement, argument: self.toastLabel.text)
 
       UIView.animate(
         withDuration: 0.5, delay: 0.0, options: .beginFromCurrentState,

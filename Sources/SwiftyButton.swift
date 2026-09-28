@@ -1,6 +1,6 @@
 //
 //  SwiftyButton.swift
-//  WHCWSIFT
+//  SwiftyUI
 //
 //  Created by Haochen Wang on 9/22/17.
 //  Copyright © 2017 Haochen Wang. All rights reserved.
@@ -51,6 +51,16 @@ public class SwiftyButton: UIControl, ImageSettable {
     applyBackgroundImage(image)
     tapHandler = handler
     addTarget(self, action: #selector(btnTapped(_:)), for: .touchUpInside)
+    // 继承 UIControl、标题自绘,不像 UIButton 那样自带无障碍暴露:默认按按钮暴露,
+    // label 取当前标题(见 accessibilityLabel)。
+    isAccessibilityElement = true
+    accessibilityTraits = .button
+  }
+
+  /// 未显式设置时取当前标题。
+  public override var accessibilityLabel: String? {
+    get { super.accessibilityLabel ?? titleLabel.text }
+    set { super.accessibilityLabel = newValue }
   }
 
   public required init?(coder aDecoder: NSCoder) {
@@ -63,7 +73,8 @@ public class SwiftyButton: UIControl, ImageSettable {
   // target/action 注册本身没问题,分发这一步没有发生),因此测试需要直接
   // 调用 btnTapped 而不能走 sendActions。
   //
-  // 注意这与 Task 13 把 mergedAttributedText 改为 internal **不是同一类变更**——
+  // 注意这与 Task 13(docs/superpowers/plans/2026-07-27-swiftyui-2.0-modernization.md)
+  // 把 mergedAttributedText 改为 internal **不是同一类变更**——
   // 那个属性此前是 public,Task 13 是收紧;这里是从 private 放宽。
   // 之所以可接受:@objc 方法本就通过 ObjC 运行时对外可达,
   // Swift 访问级别并不构成真正的封装边界。

@@ -13,6 +13,26 @@ final class SwiftyButtonTests: XCTestCase {
     XCTAssertNotNil(button.backgroundImage)
   }
 
+  /// SwiftyButton 默认以按钮身份暴露给无障碍,label 取标题;显式设置优先。
+  ///
+  /// 它继承 UIControl、标题由 SwiftyLabel 自绘,不像 UIButton 那样自带无障碍暴露。
+  /// 曾经什么都不设:在无障碍树里只是一个匿名元素,VoiceOver 读不出、UI 测试也点不到,
+  /// 示例 App 只能在调用点手工补。
+  ///
+  /// 判别力:删掉 init 里的两项默认值与 accessibilityLabel 覆写,前三条断言失败。
+  func testExposesItselfToAccessibilityAsButton() {
+    let button = SwiftyButton("OK", nil, ClosureWrapper { _ in })
+    XCTAssertTrue(button.isAccessibilityElement)
+    XCTAssertTrue(button.accessibilityTraits.contains(.button))
+    XCTAssertEqual(button.accessibilityLabel, "OK")
+
+    button.titleLabel.text = "Go"
+    XCTAssertEqual(button.accessibilityLabel, "Go", "label 应跟随当前标题")
+
+    button.accessibilityLabel = "自定义"
+    XCTAssertEqual(button.accessibilityLabel, "自定义", "显式设置的 label 优先")
+  }
+
   /// B3:backgroundImage 往返不应丢失 scale
   func testBackgroundImageRoundTripPreservesScale() {
     let format = UIGraphicsImageRendererFormat()

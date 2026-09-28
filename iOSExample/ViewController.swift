@@ -27,10 +27,7 @@ class ViewController: UIViewController {
     label.textAlignment = .topLeft
     label.layer.cornerRadius = 5
     label.clipsToBounds = true
-    // SwiftyLabel 用 TextKit 自绘,不像 UILabel 那样自带无障碍暴露,
-    // 需要显式声明才能被 VoiceOver 读到、被 UI 测试查询到。
-    label.isAccessibilityElement = true
-    label.accessibilityTraits = .staticText
+    // SwiftyLabel 默认就是静态文本无障碍元素;这里只给 UI 测试一个定位用的标识。
     label.accessibilityIdentifier = "EventLog"
     return label
   }()
@@ -81,12 +78,7 @@ class ViewController: UIViewController {
     // 短边那么多,原来 y = 510 的位置整个落在屏幕外,按钮在横屏下根本点不到。
     myBtn.frame = CGRect(x: 170, y: 280, width: 100, height: 100)
     myBtn.titleLabel.textColor = .white
-    // SwiftyButton 继承 UIControl,不像 UIButton 那样自带无障碍暴露:
-    // 不设这几项,它在无障碍树里只是一个匿名的 Other,VoiceOver 读不出、
-    // UI 测试也点不到。
-    myBtn.isAccessibilityElement = true
-    myBtn.accessibilityTraits = .button
-    myBtn.accessibilityLabel = "Button"
+    // SwiftyButton 默认就以按钮身份暴露给无障碍、label 取标题;这里只给 UI 测试一个定位用的标识。
     myBtn.accessibilityIdentifier = "MainButton"
 
     // 防抖演示。回调只往 EventLog 记一条,**不遮挡屏幕**。
@@ -108,9 +100,6 @@ class ViewController: UIViewController {
     debounceBtn.frame = CGRect(x: 290, y: 280, width: 100, height: 100)
     debounceBtn.backgroundColor = .darkGray
     debounceBtn.titleLabel.textColor = .white
-    debounceBtn.isAccessibilityElement = true
-    debounceBtn.accessibilityTraits = .button
-    debounceBtn.accessibilityLabel = "Debounce"
     debounceBtn.accessibilityIdentifier = "DebounceButton"
 
     eventLog.addTo(view)
