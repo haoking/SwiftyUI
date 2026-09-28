@@ -1,6 +1,6 @@
 //
 //  SwiftyColor.swift
-//  WHCWSIFT
+//  SwiftyUI
 //
 //  Created by Haochen Wang on 9/28/17.
 //  Copyright © 2017 Haochen Wang. All rights reserved.
@@ -18,16 +18,20 @@ extension UIColor {
   @inlinable
   @inline(__always)
   public static func hex(_ hex: UInt, _ A: CGFloat = 1.0) -> UIColor {
-    let mask: Int = 0xFF
-    let r = CGFloat(Int(hex >> 16) & mask)
-    let g = CGFloat(Int(hex >> 8) & mask)
-    let b = CGFloat(Int(hex) & mask)
+    // 在 UInt 上取位,不先转 Int:`Int(hex)` 对 ≥ 2^63 的输入会 trap。
+    let r = CGFloat((hex >> 16) & 0xFF)
+    let g = CGFloat((hex >> 8) & 0xFF)
+    let b = CGFloat(hex & 0xFF)
     return load(r, g, b, A)
   }
 
   public final class func hex(_ hexString: String, _ alpha: CGFloat = 1.0) -> UIColor {
     var hex: String = hexString.hasPrefix("#") ? String(hexString.dropFirst()) : hexString
     guard hex.count == 3 || hex.count == 6 else { return UIColor(white: 1.0, alpha: 0.0) }
+    // 逐字符校验:UInt(_:radix:) 接受前导 "+"/"-","+FFFFF" 会被当成 0x0FFFFF。
+    guard hex.allSatisfy({ $0.isASCII && $0.isHexDigit }) else {
+      return UIColor(white: 1.0, alpha: 0.0)
+    }
     if hex.count == 3 {
       for (index, char) in hex.enumerated() {
         hex.insert(char, at: hex.index(hex.startIndex, offsetBy: index * 2))
@@ -59,13 +63,17 @@ extension UIColor {
     }
   }
 
+  // 下面几个判断各只取一次分量:redValue / greenValue / blueValue 每读一个都要
+  // 重新取一遍 cgColor.components(每次分配一个数组),取色时对每个候选色都要调用。
+
   internal final var isDark: Bool {
-    return (0.2126 * redValue + 0.7152 * greenValue + 0.0722 * blueValue) < 0.5
+    let c = rgba()
+    return (0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b) < 0.5
   }
 
   internal final var isBlackOrWhite: Bool {
-    return (redValue > 0.91 && greenValue > 0.91 && blueValue > 0.91)
-      || (redValue < 0.09 && greenValue < 0.09 && blueValue < 0.09)
+    let c = rgba()
+    return (c.r > 0.91 && c.g > 0.91 && c.b > 0.91) || (c.r < 0.09 && c.g < 0.09 && c.b < 0.09)
   }
 
   internal final func color(minSaturation: CGFloat) -> UIColor {
@@ -80,27 +88,27 @@ extension UIColor {
 
   internal final func isDistinct(from color: UIColor) -> Bool {
     let threshold: CGFloat = 0.25
+    let a = rgba()
+    let b = color.rgba()
 
-    guard
-      abs(redValue - color.redValue) > threshold
-        || abs(greenValue - color.greenValue) > threshold
-        || abs(blueValue - color.blueValue) > threshold
+    guard abs(a.r - b.r) > threshold || abs(a.g - b.g) > threshold || abs(a.b - b.b) > threshold
     else { return false }
 
     // 两个颜色都接近灰度时,通道差异不足以说明它们"可区分"。
     // 原实现在此处赋 result = false 后又被无条件的 result = true 覆盖,
     // 整个判断形同虚设(B13)。
-    let selfIsNearGray = abs(redValue - greenValue) < 0.03 && abs(redValue - blueValue) < 0.03
-    let otherIsNearGray =
-      abs(color.redValue - color.greenValue) < 0.03 && abs(color.redValue - color.blueValue) < 0.03
+    let selfIsNearGray = abs(a.r - a.g) < 0.03 && abs(a.r - a.b) < 0.03
+    let otherIsNearGray = abs(b.r - b.g) < 0.03 && abs(b.r - b.b) < 0.03
     if selfIsNearGray && otherIsNearGray { return false }
 
     return true
   }
 
   fileprivate final func isContrasting(with color: UIColor) -> Bool {
-    let bgLum = 0.2126 * redValue + 0.7152 * greenValue + 0.0722 * blueValue
-    let fgLum = 0.2126 * color.redValue + 0.7152 * color.greenValue + 0.0722 * color.blueValue
+    let a = rgba()
+    let b = color.rgba()
+    let bgLum = 0.2126 * a.r + 0.7152 * a.g + 0.0722 * a.b
+    let fgLum = 0.2126 * b.r + 0.7152 * b.g + 0.0722 * b.b
     let contrast = bgLum > fgLum ? (bgLum + 0.05) / (fgLum + 0.05) : (fgLum + 0.05) / (bgLum + 0.05)
     return 1.6 < contrast
   }
@@ -133,11 +141,11 @@ extension UIImage {
       ) -> Void
     )?
   ) {
-    Promise<(UIColor, UIColor, UIColor, UIColor)>.firstly { [weak self] (update, _) in
-
-      guard let strongSelf = self else { return }
-      update(strongSelf.getColors())
-
+    // 强捕获图片,不用 [weak self]:接收者常常是个临时值,弱捕获时它可能在任务开始
+    // 之前就被释放,任务随之什么也不做、complete 永不调用。图片并不持有这条链,
+    // 强捕获不会成环,只是让它活到分析结束。
+    Promise<(UIColor, UIColor, UIColor, UIColor)>.firstly { (update, _) in
+      update(self.getColors())
     }.then(on: .main) { (_, colors) in
       // Promise 是非隔离的调度原语,它的任务闭包是 @Sendable 的;而 `on: .main`
       // 保证这里确实跑在 OperationQueue.main 上。这一次 assumeIsolated 把该保证
@@ -184,8 +192,9 @@ extension UIImage {
   ///   变成"抛错"。需要"菊花一定会停"的调用方,请自己在外面加一层超时。
   /// - Throws: `PromiseError.cancelled` —— 取色链条**的任务**被取消(最常见的
   ///   来源是 SwiftyThreadPool 收到内存告警调用 removeAll())。
-  /// - Throws: `PromiseError.noValue` —— 链条终结但没有产出值。正常情况下
-  ///   不会发生;它对应 self 在分析开始前就被释放这一理论情形。
+  /// - Throws: `PromiseError.noValue` —— 链条终结但没有产出值。按当前实现不会抛出:
+  ///   await 期间接收者由调用方保活,下面的 weak self 守卫不会失败;没有位图可分析的
+  ///   图片也会得到回落色而不是空值。保留它,只为不对 value() 的可选结果强解包。
   public final func colors() async throws -> (
     background: UIColor, primary: UIColor, secondary: UIColor, detail: UIColor
   ) {
@@ -204,73 +213,94 @@ extension UIImage {
   private final class CountedColor {
     let color: UIColor
     let count: Int
+    /// 像素的 0xRRGGBB 打包值,只用于次数相同时的排序,让结果与字典的遍历顺序无关。
+    let key: UInt32
 
-    init(color: UIColor, count: Int) {
+    init(color: UIColor, count: Int, key: UInt32) {
       self.color = color
       self.count = count
+      self.key = key
     }
   }
 
   private final func getColors() -> (
     background: UIColor, primary: UIColor, secondary: UIColor, detail: UIColor
   ) {
-    let ratio: CGFloat = size.width / size.height
+    // 没有位图可分析(零尺寸的 UIImage() 之类)时,按"一个可用颜色都找不到"处理,
+    // 取值与下方算法在那种情形下的回落值相同。原来这里是 `.cgImage!`,在线程池的
+    // 后台线程上 trap —— 同 B1/B19 的强解包。
+    let noColors: (UIColor, UIColor, UIColor, UIColor) = (.black, .white, .white, .white)
     let r_width: CGFloat = 250
-    let cgImage: CGImage = reSize(to: CGSize(width: r_width, height: r_width / ratio)).cgImage!
+    let targetHeight = r_width / (size.width / size.height)
+    guard targetHeight.isFinite, targetHeight > 0 else { return noColors }
+
+    // 下采样到 scale 为 1、恰好 250px 宽的位图。曾经借用 reSize(to:),它按**屏幕** scale
+    // 出图(@3x 设备上 750px 宽):像素量是设计值的 9 倍,而下方 x∈[5,10] 的背景采样带
+    // 随 scale 落在图上不同的位置,同一张图在不同设备上取出不同的颜色。
+    let format = UIGraphicsImageRendererFormat()
+    format.scale = 1
+    format.opaque = isOpaque
+    format.preferredRange = .standard
+    let targetSize = CGSize(width: r_width, height: targetHeight)
+    let downsampled = UIGraphicsImageRenderer(size: targetSize, format: format).image { _ in
+      draw(in: CGRect(origin: .zero, size: targetSize))
+    }
+    guard let cgImage = downsampled.cgImage else { return noColors }
 
     let width: Int = cgImage.width
     let height: Int = cgImage.height
-    let bytesPerPixel: Int = 4
-    let bytesPerRow: Int = width * bytesPerPixel
-    let bitsPerComponent: Int = 8
+    let bytesPerRow: Int = width * 4
     let randomColorsThreshold: Int = Int(CGFloat(height) * 0.01)
     let blackColor: UIColor = .black
     let whiteColor: UIColor = .white
-    let colorSpace: CGColorSpace = CGColorSpaceCreateDeviceRGB()
-    let raw: UnsafeMutableRawPointer = malloc(bytesPerRow * height)
-    let bitmapInfo: UInt32 = CGImageAlphaInfo.premultipliedFirst.rawValue
-    let context: CGContext? = CGContext(
-      data: raw, width: width, height: height, bitsPerComponent: bitsPerComponent,
-      bytesPerRow: bytesPerRow, space: colorSpace, bitmapInfo: bitmapInfo)
-    context?.draw(cgImage, in: CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height)))
-    let data: UnsafePointer<UInt8>? = UnsafePointer<UInt8>(
-      context?.data?.assumingMemoryBound(to: UInt8.self))
-    let imageBackgroundColors: NSCountedSet = NSCountedSet(capacity: height)
-    let imageColors: NSCountedSet = NSCountedSet(capacity: width * height)
+    // 必须清零:透明像素以 source-over 画上去等于什么都没写,malloc 的残留内容
+    // (通常是上一次取色的位图)会被当成像素读出来。
+    guard let raw = calloc(height, bytesPerRow) else { return noColors }
+    defer { free(raw) }
+    guard
+      let context = CGContext(
+        data: raw, width: width, height: height, bitsPerComponent: 8, bytesPerRow: bytesPerRow,
+        space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue)
+    else { return noColors }
+    context.draw(cgImage, in: CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height)))
+    let pixels = raw.assumingMemoryBound(to: UInt8.self)
+
+    // 像素打包成 0xRRGGBB 计数,只为出现过的颜色建 UIColor。曾经每个像素都新建一个
+    // UIColor 放进 NSCountedSet(靠 UIColor 的 hash / isEqual 去重),按列遍历行优先的
+    // 缓冲区。像素格式是 ARGB(premultipliedFirst),字节 1…3 是 R、G、B。
+    var edgeCounts: [UInt32: Int] = [:]
+    var imageCounts: [UInt32: Int] = [:]
+    for y in 0..<height {
+      let row = pixels + y * bytesPerRow
+      for x in 0..<width {
+        let pixel = row + x * 4
+        let key = UInt32(pixel[1]) << 16 | UInt32(pixel[2]) << 8 | UInt32(pixel[3])
+        imageCounts[key, default: 0] += 1
+        if x >= 5 && x <= 10 {
+          edgeCounts[key, default: 0] += 1
+        }
+      }
+    }
+    func color(of key: UInt32) -> UIColor {
+      .load(CGFloat((key >> 16) & 0xFF), CGFloat((key >> 8) & 0xFF), CGFloat(key & 0xFF))
+    }
 
     // B6: sort(by:) 要求严格弱序,原实现传 <= 属未定义行为。
     // B12(排序方向): 该算法要把"出现次数最多"的边缘色当作背景色,
     //                 因此这里必须是降序,取 .first 得到最常见的颜色。
+    // 次数相同时按打包值排:字典的遍历顺序逐进程随机,不加这一条结果就不确定。
     let sortComparator: (CountedColor, CountedColor) -> Bool = { (a, b) -> Bool in
-      return a.count > b.count
+      a.count != b.count ? a.count > b.count : a.key < b.key
     }
 
-    for x in 0..<width {
-      for y in 0..<height {
-        let pixel: Int = ((width * y) + x) * bytesPerPixel
-        let color: UIColor = .load(
-          CGFloat((data?[pixel + 1])!), CGFloat((data?[pixel + 2])!), CGFloat((data?[pixel + 3])!))
-        if x >= 5 && x <= 10 {
-          imageBackgroundColors.add(color)
-        }
-
-        imageColors.add(color)
-      }
-    }
-
-    var sortedColors: [CountedColor] = []
-
-    for (_, color) in imageBackgroundColors.enumerated() {
-      guard let color = color as? UIColor else { continue }
-      let colorCount: Int = imageBackgroundColors.count(for: color)
-      if randomColorsThreshold <= colorCount {
-        sortedColors.append(CountedColor(color: color, count: colorCount))
-      }
+    var sortedColors: [CountedColor] = edgeCounts.compactMap { key, count in
+      count >= randomColorsThreshold ? CountedColor(color: color(of: key), count: count, key: key) : nil
     }
 
     sortedColors.sort(by: sortComparator)
 
-    var proposedEdgeColor: CountedColor = .init(color: blackColor, count: 1)
+    var proposedEdgeColor: CountedColor = .init(color: blackColor, count: 1, key: 0)
 
     if let first = sortedColors.first { proposedEdgeColor = first }
 
@@ -289,16 +319,12 @@ extension UIImage {
     let imageBackgroundColor: UIColor = proposedEdgeColor.color
     let isDarkBackgound: Bool = imageBackgroundColor.isDark
 
-    sortedColors.removeAll()
-
-    for (_, imageColor) in imageColors.enumerated() {
-      guard let imageColor = imageColor as? UIColor else { continue }
-      let color = imageColor.color(minSaturation: 0.15)
-
-      if color.isDark == (!isDarkBackgound) {
-        let colorCount: Int = imageColors.count(for: color)
-        sortedColors.append(CountedColor(color: color, count: colorCount))
-      }
+    // 候选色按原色的出现次数计:曾用提饱和之后新建的颜色去查计数,那个颜色图里从没
+    // 出现过,灰色系恒为 0。
+    sortedColors = imageCounts.compactMap { key, count in
+      let candidate = color(of: key).color(minSaturation: 0.15)
+      guard candidate.isDark == !isDarkBackgound else { return nil }
+      return CountedColor(color: candidate, count: count, key: key)
     }
 
     sortedColors.sort(by: sortComparator)
@@ -307,7 +333,7 @@ extension UIImage {
     var secondaryColor: UIColor?
     var detailColor: UIColor?
 
-    for (_, countedColor) in sortedColors.enumerated() {
+    for countedColor in sortedColors {
       let color: UIColor = countedColor.color
       if primaryColor == nil && color.isContrasting(with: imageBackgroundColor) {
         primaryColor = color
@@ -323,8 +349,6 @@ extension UIImage {
         break
       }
     }
-
-    free(raw)
 
     return (
       imageBackgroundColor, primaryColor ?? (isDarkBackgound ? whiteColor : blackColor),

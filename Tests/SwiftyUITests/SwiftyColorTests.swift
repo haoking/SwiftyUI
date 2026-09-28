@@ -19,6 +19,23 @@ final class SwiftyColorTests: XCTestCase {
     XCTAssertEqual(UIColor.hex(0x000000, 0.5).alphaValue, 0.5, accuracy: 0.001)
   }
 
+  /// 超过 24 位的输入只取低 24 位,与三个通道各自 `& 0xFF` 的既有语义一致,不能 trap。
+  ///
+  /// 蓝色通道曾写作 `Int(hex) & mask`:`hex` ≥ 2^63 时 `Int(_:)` 装不下,
+  /// 直接 "Not enough bits to represent the passed value"。红绿两个通道先右移再转换,
+  /// 所以只有蓝色这一处会崩。
+  func testHexFromUIntKeepsLow24BitsWithoutTrapping() {
+    let color = UIColor.hex(UInt.max)
+    XCTAssertEqual(color.redValue, 1.0, accuracy: 0.001)
+    XCTAssertEqual(color.greenValue, 1.0, accuracy: 0.001)
+    XCTAssertEqual(color.blueValue, 1.0, accuracy: 0.001)
+
+    let masked = UIColor.hex(0xAB00_0000_0033_6699)
+    XCTAssertEqual(masked.redValue, 51.0 / 255.0, accuracy: 0.001)
+    XCTAssertEqual(masked.greenValue, 102.0 / 255.0, accuracy: 0.001)
+    XCTAssertEqual(masked.blueValue, 153.0 / 255.0, accuracy: 0.001)
+  }
+
   // MARK: - hex 字符串形式
 
   func testHexFromSixDigitString() {
@@ -54,6 +71,18 @@ final class SwiftyColorTests: XCTestCase {
     XCTAssertEqual(UIColor.hex("zzz").alphaValue, 0.0, accuracy: 0.001)
     XCTAssertEqual(UIColor.hex("gggggg").alphaValue, 0.0, accuracy: 0.001)
     XCTAssertEqual(UIColor.hex("#nothex").alphaValue, 0.0, accuracy: 0.001)
+  }
+
+  /// 带正负号的串不是合法的十六进制颜色,同样返回全透明白色。
+  ///
+  /// 解析交给 `UInt(_:radix:)`,而它接受前导 "+"(也接受 "-0"):"+FFFFF" 长度是 6,
+  /// 曾被当成 0x0FFFFF 返回一个颜色。
+  ///
+  /// 判别力:去掉逐字符的十六进制校验,前两条断言得到不透明颜色。
+  func testHexWithSignCharactersReturnsTransparent() {
+    XCTAssertEqual(UIColor.hex("+FFFFF").alphaValue, 0.0, accuracy: 0.001)
+    XCTAssertEqual(UIColor.hex("-00000").alphaValue, 0.0, accuracy: 0.001)
+    XCTAssertEqual(UIColor.hex("#+FF").alphaValue, 0.0, accuracy: 0.001)
   }
 
   // MARK: - rgba 取值
@@ -103,10 +132,11 @@ extension SwiftyColorTests {
   /// getColors() 背景采样只读取边缘竖条 x∈[5,10],不代表整张图片的多数色。
   ///
   /// 本测试**不能**用来验证 B6/B12 的排序方向。
-  /// 原因(Task 3 在 task-3-report.md "Fix Round 1/5" 中已证实,本次运行
-  /// 再次实测确认):getColors() 的背景采样只读取 resize 后 250px 宽位图中
-  /// x∈[5,10] 这一条边缘竖条(SwiftyColor.swift 内 imageBackgroundColors
-  /// 的采集逻辑),而测试图左 40% 红对应 x∈[0,100),该竖条完全落在红色区域
+  /// 原因(2.0 改造的 Task 3 实测证实,之后再次复测确认;当时的任务报告未入库):
+  /// getColors() 的背景采样只读取 resize 后位图中像素坐标 x∈[5,10] 这一条边缘竖条
+  /// (SwiftyColor.swift 内 imageBackgroundColors 的采集逻辑)。那张位图固定是
+  /// scale 为 1、250px 宽(与设备无关,见 testBackgroundStripIsMeasuredOn250PixelBitmap),
+  /// 测试图左 40% 的红色对应 x∈[0,100),该竖条完全落在红色区域
   /// 内、只包含红色一种颜色。sortedColors 因此只有一个元素,.first 与升序
   /// /降序无关——背景色在排序修正前后都是纯红,这是已验证的不变量,而不是
   /// "蓝色因为是多数色而被选中"。实测:降序修正后 background 仍为
@@ -148,6 +178,34 @@ extension SwiftyColorTests {
     XCTAssertTrue(wasMainThread.value, "colors 的回调必须在主线程")
   }
 
+  /// 调用方不再持有图片时,回调也必须照常到达。
+  ///
+  /// `image.colors { … }` 的接收者经常是个临时值(`UIImage(data:)` 的结果、
+  /// 一个局部变量)。取色任务曾经只 `[weak self]` 捕获图片:任务真正开始之前
+  /// 图片就被释放的话,任务什么也不做,回调永不调用,且没有任何信号 —— 文档只把
+  /// "出错或被取消"列为不回调的情形,这一条不在其中。图片并不持有这条链,强捕获
+  /// 不会成环。
+  ///
+  /// 为了让"任务开始之前图片已释放"确定发生,先挂起共享线程池(取色链条只走
+  /// `SwiftyThreadPool.default`,没有注入口),丢掉图片后再恢复。`defer` 保证无论
+  /// 成败都恢复这个进程级单例,不污染后面的测试。
+  ///
+  /// 判别力:把捕获改回 `[weak self]`,本测试等满 10 秒超时变红。
+  func testImageColorsCallsBackEvenWhenCallerDropsImage() {
+    let pool = SwiftyThreadPool.default
+    pool.stop()
+    defer { pool.restart() }
+
+    let done = expectation(description: "colors 回调")
+    autoreleasepool {
+      let image = TestSupport.makeSolidImage(color: .green, size: CGSize(width: 64, height: 64))
+      image.colors { _, _, _, _ in done.fulfill() }
+    }
+
+    pool.restart()
+    wait(for: [done], timeout: 10.0)
+  }
+
   /// 排序方向的判别性基线,并对方向本身做硬断言回归。
   ///
   /// 与 testImageColorsBackgroundSamplesEdgeStripOnly 不同(那个测试的采样
@@ -160,7 +218,7 @@ extension SwiftyColorTests {
   /// 证实原实现排序方向确实颠倒,已在 Sources/SwiftyColor.swift 中改为降序。
   ///
   /// 本测试用不等式(而非精确相等)断言锁定这一方向:比较器改回升序时,
-  /// 本测试必须失败(已实测验证,见 task-8-report.md 修复轮次 2)。用不等式
+  /// 本测试必须失败(已实测验证;当时的任务报告未入库)。用不等式
   /// 是为了不把浮点量化误差(如 0.55×255=140.25→140/255)锁进断言里,
   /// 同时仍然具备完整的方向判别力。
   func testImageColorsSortDirectionBaseline() {
@@ -247,6 +305,87 @@ extension SwiftyColorTests {
       "背景色若仍是纯白,说明那行又变回了整数除法,0.3 的阈值形同虚设(B12)")
   }
 
+  /// 背景采样带是 250px 宽下采样位图上的第 5–10 列,与设备屏幕 scale 无关。
+  ///
+  /// getColors 曾借用 reSize(to:) 下采样,那是按**屏幕** scale 出图:@3x 设备上位图有
+  /// 750px 宽,像素量是 250px 设计值的 9 倍,而第 5–10 列在图上的位置随 scale 移动 ——
+  /// 同一张图在不同设备上取出不同的背景色。
+  ///
+  /// 夹具:250pt 宽,左侧 4pt 红、其余蓝。在 250px 位图上第 5–10 列全是蓝;
+  /// 在 @3x 的 750px 位图上,第 5–10 列只对应 1.7–3.7pt,落在红里。
+  ///
+  /// 判别力:改回按屏幕 scale 下采样,在 scale > 1 的模拟器上背景色是红。
+  @MainActor
+  func testBackgroundStripIsMeasuredOn250PixelBitmap() async throws {
+    XCTAssertGreaterThan(UIScreen.main.scale, 1, "前提:屏幕 scale > 1,否则本测试无判别力")
+    let format = UIGraphicsImageRendererFormat()
+    format.scale = 1
+    format.opaque = true
+    let size = CGSize(width: 250, height: 250)
+    let image = UIGraphicsImageRenderer(size: size, format: format).image { ctx in
+      UIColor.blue.setFill()
+      ctx.fill(CGRect(origin: .zero, size: size))
+      UIColor.red.setFill()
+      ctx.fill(CGRect(x: 0, y: 0, width: 4, height: 250))
+    }
+
+    let result = try await withTestTimeout { try await image.colors() }
+
+    XCTAssertGreaterThan(result.background.blueValue, 0.9, "采样带应落在蓝色区域")
+    XCTAssertLessThan(result.background.redValue, 0.1, "采样带不应落在左侧 4pt 的红色里")
+  }
+
+  /// 候选色按真实出现次数排序:低饱和的多数色不能因为计数查错而垫底。
+  ///
+  /// 候选循环先把颜色提到最低饱和度 0.15 再入选,计数却曾用**提饱和之后**的新颜色去查
+  /// —— 那个颜色从没在图里出现过,灰色系的计数恒为 0,再多也排到最后。
+  ///
+  /// 夹具:左侧深蓝边带(背景),其余 70% 浅灰、30% 浅粉。浅灰出现得多,应当是主色
+  /// (提饱和后约为 (0.8, 0.68, 0.68));计数查错时主色会变成浅粉 (1, 0.7, 0.8)。
+  ///
+  /// 判别力:改回用提饱和后的颜色查计数,主色的红色分量是 1.0。
+  func testPrimaryColorIsTheMostFrequentEvenWhenDesaturated() async throws {
+    let format = UIGraphicsImageRendererFormat()
+    format.scale = 1
+    format.opaque = true
+    let image = UIGraphicsImageRenderer(size: CGSize(width: 250, height: 250), format: format)
+      .image { ctx in
+        UIColor(red: 0.8, green: 0.8, blue: 0.8, alpha: 1).setFill()
+        ctx.fill(CGRect(x: 50, y: 0, width: 200, height: 175))
+        UIColor(red: 1, green: 0.7, blue: 0.8, alpha: 1).setFill()
+        ctx.fill(CGRect(x: 50, y: 175, width: 200, height: 75))
+        UIColor(red: 0, green: 0, blue: 0.3, alpha: 1).setFill()
+        ctx.fill(CGRect(x: 0, y: 0, width: 50, height: 250))
+      }
+
+    let result = try await withTestTimeout { try await image.colors() }
+
+    XCTAssertLessThan(result.primary.redValue, 0.9, "主色应是占多数的浅灰,而不是浅粉")
+    XCTAssertEqual(
+      result.primary.greenValue, result.primary.blueValue, accuracy: 0.05, "浅灰提饱和后绿蓝分量相等")
+  }
+
+  /// 透明像素按"透明黑"参与统计,不能读到上一次分析留下的内存。
+  ///
+  /// 像素缓冲区曾用 malloc 分配(内容未初始化),透明像素以 source-over 画上去等于什么
+  /// 都没写,读出来的是那块内存里残留的东西 —— 通常是上一次取色刚释放的位图。
+  /// 带透明底的图标、PNG 因此得到随机的背景色。
+  ///
+  /// 夹具:先分析一张纯绿图(同样尺寸的缓冲区随即被释放),再分析一张全透明图。
+  ///
+  /// 判别力:把缓冲区改回 malloc,全透明图的背景色读成残留的绿色。
+  func testTransparentPixelsDoNotReadUninitializedMemory() async throws {
+    let green = TestSupport.makeSolidImage(color: .green, size: CGSize(width: 64, height: 64))
+    _ = try await withTestTimeout { try await green.colors() }
+
+    let clear = TestSupport.makeSolidImage(color: .clear, size: CGSize(width: 64, height: 64))
+    let result = try await withTestTimeout { try await clear.colors() }
+
+    XCTAssertLessThan(result.background.greenValue, 0.1, "全透明图的背景应按透明黑统计,而不是残留的绿色")
+    XCTAssertLessThan(result.background.redValue, 0.1)
+    XCTAssertLessThan(result.background.blueValue, 0.1)
+  }
+
   // MARK: - async 变体
 
   /// colors() 的 async 变体把四个颜色送了出来。
@@ -280,5 +419,35 @@ extension SwiftyColorTests {
     XCTAssertEqual(result.primary, sync.1, "async 变体的 primary 必须与同步版本一致")
     XCTAssertEqual(result.secondary, sync.2, "async 变体的 secondary 必须与同步版本一致")
     XCTAssertEqual(result.detail, sync.3, "async 变体的 detail 必须与同步版本一致")
+  }
+
+  // MARK: - 没有位图可分析
+
+  /// 没有位图可分析的图片(零尺寸的 `UIImage()`)不能让取色崩溃。
+  ///
+  /// getColors() 第一步曾是 `reSize(to:).cgImage!`:零尺寸时 reSize 原样返回自己,
+  /// 而 `UIImage()` 没有 CGImage,于是在线程池的后台线程上强解包 nil,整个进程崩溃
+  /// —— 回调版与 async 版走的是同一条路径,这里用 async 版锁住。
+  ///
+  /// 现在按"一个可用颜色都找不到"处理,取值与算法在那种情形下的默认值相同:
+  /// 边缘候选为空时背景色回落为黑,背景偏暗时另外三色回落为白。
+  ///
+  /// 判别力:把那行改回 `.cgImage!`,本测试所在的测试进程直接崩溃。
+  func testColorsOfImageWithoutBitmapDoesNotCrash() async throws {
+    let empty = UIImage()
+    XCTAssertNil(empty.cgImage, "前提:UIImage() 没有 CGImage,否则本测试无判别力")
+
+    let result = try await withTestTimeout { try await empty.colors() }
+
+    XCTAssertEqual(result.background.redValue, 0, accuracy: 0.01, "无可用颜色时背景色应回落为黑")
+    XCTAssertEqual(result.background.greenValue, 0, accuracy: 0.01)
+    XCTAssertEqual(result.background.blueValue, 0, accuracy: 0.01)
+    for (name, color) in [
+      ("primary", result.primary), ("secondary", result.secondary), ("detail", result.detail),
+    ] {
+      XCTAssertEqual(color.redValue, 1, accuracy: 0.01, "\(name) 应回落为白")
+      XCTAssertEqual(color.greenValue, 1, accuracy: 0.01, "\(name) 应回落为白")
+      XCTAssertEqual(color.blueValue, 1, accuracy: 0.01, "\(name) 应回落为白")
+    }
   }
 }
