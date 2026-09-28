@@ -11,9 +11,9 @@ High performance and lightweight UIView, UIImage, UIImageView, UIlabel, UIButton
 - [x] UIImage Extensions for Inflation / Scaling / Rounding
 - [x] Auto-Purging In-Memory Image Cache
 - [x] SwiftyImageView extension — 7 built-in image transitions plus a `custom` case
-- [x] SwiftyImageView 150% High performance more than UIImageView, depending on UIView-package, Image-GPU and Image-Cache
-- [x] SwiftyLabel 300% High performance more than UIlabel, depending on UIView-package and TextKit
-- [x] SwiftyButton 300% High performance more than UIButton, depending on UIControl-package, TextKit and BackgroundImage-Advanced
+- [x] SwiftyImageView puts the image straight onto `layer.contents` for the GPU to composite, backed by the in-memory image cache
+- [x] SwiftyLabel draws its text with TextKit on a plain `UIView`, without UILabel's machinery
+- [x] SwiftyButton is a lightweight `UIControl` with a TextKit-drawn title, a GPU-composited background image and built-in tap debouncing
 - [x] SwiftyToast queues toasts on a shared, main-actor-isolated centre and shows them one at a time, so they never overlap
 - [x] SwiftyAlert contains SuccessAlert, ErrorAlert, WarningAlert, InfoAlert, EditAlert and their special styles.
 - [x] lightweight, almost one class for each UI
@@ -49,13 +49,14 @@ To integrate SwiftyUI into your Xcode project using Swift Package Manager
 
 Search Package Dependencies in PROJECT:
 
-```ruby
+```text
 SwiftyUI
 ```
 
 Or, add it to the dependencies value of your `Package.swift`:
 
-```ruby
+<!-- readme-check: skip Package.swift 清单里的片段,不是能放进函数体的语句 -->
+```swift
 dependencies: [
     .package(url: "https://github.com/haoking/SwiftyUI.git", .upToNextMajor(from: "2.1.0"))
 ]
@@ -160,7 +161,7 @@ myView.frame = CGRect.init(x: 50, y: 50, width: 100, height: 100)
 
 But a plain `UIView` gets none of the `isOpaque` upkeep. In 1.x it appeared to, because the first `addTo(_:)` call anywhere in the process lazily swizzled `backgroundColor` and `alpha` on **every** `UIView` in the host app. 2.0 removed that (see **B15** in the CHANGELOG); `SwiftyView` uses plain property observers on itself instead. You have three options:
 
-- use `SwiftyView` (or `SwiftyLabel` / `SwiftyButton` / `SwiftyImageView`, which are built on it);
+- use `SwiftyView` or `SwiftyLabel`, which keep `isOpaque` in step with their own `backgroundColor` and `alpha`. `SwiftyButton` and `SwiftyImageView` recompute it only when their image is set. None of them subclass `SwiftyView` (`SwiftyLabel` and `SwiftyImageView` subclass `UIView`, `SwiftyButton` subclasses `UIControl`);
 - call `myView.updateOpaque()` yourself after changing `backgroundColor` or `alpha`;
 - opt back into the global behaviour with `SwiftyUI.enableGlobalOpaqueOptimization()`.
 
@@ -204,8 +205,8 @@ func applyDominantColor(of image: UIImage) async {
         let (background, _, _, _) = try await image.colors()
         view.backgroundColor = background
     } catch {
-        // PromiseError.cancelled if the analysis was cancelled,
-        // PromiseError.noValue if the image went away before it started.
+        // PromiseError.cancelled if the analysis was cancelled. (PromiseError.noValue
+        // exists too, but the current implementation never throws it here.)
         view.backgroundColor = .systemBackground
     }
 }
@@ -230,7 +231,7 @@ myImage?.inflate()
 
 > Do this off the main thread when you are decoding many or large images. Decoding early is only a win if it happens somewhere the main thread isn't waiting.
 
-> `UIImage.load(_:)` already calls `inflate()` for you before it caches, and `inflate()` returns immediately if the image is already inflated. Calling it on an image that came from `UIImage.load(_:)` therefore does nothing at all — hence `UIImage(named:)` above.
+> `UIImage.load(_:)` already takes care of this before it caches: loading by name caches a copy that is already decoded (made with `preparingForDisplay()`), and `UIImage.load(_:identifier:)` calls `inflate()` on the image you pass in. Either way the cached image counts as inflated, and `inflate()` returns immediately for an image that already is. Calling it on an image that came from `UIImage.load` therefore does nothing at all — hence `UIImage(named:)` above.
 
 > `UIImage.load(_:)` returns `UIImage?` — it is `nil` when no asset with that name exists. Every example below unwraps it accordingly.
 
@@ -291,7 +292,7 @@ imageCachePool.removeImage(withIdentifier: "myImage")
 
 ### SwiftyImageView
 
-SwiftyImagView inherits from UIView and the `ImageSettable` protocol. Also has a better performance, because the image goes straight onto `layer.contents` for the GPU to composite instead of through a `UIImageView` draw pass.
+SwiftyImageView inherits from UIView and the `ImageSettable` protocol. Also has a better performance, because the image goes straight onto `layer.contents` for the GPU to composite instead of through a `UIImageView` draw pass. The one exception is an image whose orientation is anything other than `.up`, or one with no bitmap behind it (a Core Image result, for instance): `layer.contents` can carry neither the orientation nor such an image, so it is redrawn once into an upright bitmap first.
 
 ```swift
 let myImage : UIImage? = UIImage.load("btnBG")
@@ -365,6 +366,8 @@ Timer.after(5.0, ClosureWrapper({ (timer) in
 })).start()
 ```
 
+> Nothing fires until you call `start()`, and the countdown runs from the moment the timer is created, not from `start()` — a timer that waits longer than its interval before being started fires straight away. Create and start it in one expression, as above.
+
 ### SwiftyToast
 
 Toasts never overlap: each one is queued on a shared centre and shown only after the previous one has finished fading out.
@@ -401,7 +404,7 @@ theAlert.setDismissBlock {
 
 ### SwiftyThreadPool
 
-`SwiftyThreadPool` manages an `OperationQueue` whose concurrency limit tracks the number of active CPUs (`2 × hw.activecpu − 1`, floored at 3), recomputed on every `add`.
+`SwiftyThreadPool` manages an `OperationQueue` whose concurrency limit follows the number of active CPUs (`2 × hw.activecpu − 1`, floored at 3), computed once when the pool is created.
 
 ```swift
 let myOperation : BlockOperation = .init {

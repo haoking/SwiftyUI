@@ -12,8 +12,9 @@ cd "$(dirname "$0")/.."
 #
 # 不能写 name=iPhone 16 Pro:同名设备存在 arm64 与 x86_64 两条记录,xcodebuild 会因歧义失败。
 # 但也不能只取 tail -1:选中哪台取决于本机装了什么以及 simctl 的列出顺序,
-# 而取色测试对屏幕 scale 敏感、几何断言对窗口尺寸敏感 —— 换台机器就可能
-# 出现无法复现的失败。因此优先钉住一个机型,缺失时才回落。
+# 而几何断言对窗口尺寸敏感 —— 换台机器就可能出现无法复现的失败。
+# 因此优先钉住一个机型,缺失时才回落。(取色测试曾经也对屏幕 scale 敏感,
+# 取色已改为在固定 250px 的位图上采样,这一条不再成立。)
 PREFERRED_DEVICE="${SWIFTYUI_SIMULATOR:-iPhone 17}"
 DEVICES="$(xcrun simctl list devices available)"
 

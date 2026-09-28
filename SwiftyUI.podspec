@@ -25,7 +25,7 @@ Pod::Spec.new do |s|
   #   * Write the description between the DESC delimiters below.
   #   * Finally, don't worry about the indent, CocoaPods strips it!
   s.description  = <<-DESC
-  High performance(100%) and lightweight(one class each UI) UIView, UIImage, UIImageView, UIlabel, UIButton and more.
+  High performance and lightweight (one class per UI component) UIView, UIImage, UIImageView, UILabel, UIButton and more.
                    DESC
 
   s.homepage     = "https://github.com/haoking/SwiftyUI"
