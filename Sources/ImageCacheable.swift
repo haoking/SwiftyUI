@@ -1,6 +1,6 @@
 //
 //  ImageCacheable.swift
-//  WHCWSIFT
+//  SwiftyUI
 //
 //  Created by Haochen Wang on 10/3/17.
 //  Copyright © 2017 Haochen Wang. All rights reserved.
@@ -33,12 +33,9 @@ final class CachedImage {
   let image: UIImage
   let identifier: String
   let totalBytes: UInt64
-  /// 记录最后访问时刻。**不再用于淘汰排序** —— 见 lastAccessSequence 的说明。
-  /// 保留它是为了保持 CachedImage 的可观测性,以及将来可能的诊断用途。
-  var lastAccessDate: Date
-  /// 淘汰排序的决胜判据,由 ImageCachePool 在持锁状态下赋值、严格单调递增。
+  /// 淘汰排序的判据(最久未访问的先淘汰),由 ImageCachePool 在持锁状态下赋值、严格单调递增。
   ///
-  /// 淘汰本应按 lastAccessDate 排序,但同一临界区内连续几次操作可能跑得
+  /// 曾经按最后访问的 Date 排序,但同一临界区内连续几次操作可能跑得
   /// 比时钟采样精度还快、拿到完全相同的 Date——实测中不仅 Date(),连
   /// DispatchTime 的纳秒级单调时钟在这种连续调用下也会撞到相同读数。
   /// 时间戳一旦打平,sorted(by:) 对并列项的相对顺序就退化成字典哈希遍历
@@ -49,17 +46,11 @@ final class CachedImage {
   init(_ image: UIImage, identifier: String) {
     self.image = image
     self.identifier = identifier
-    self.lastAccessDate = Date()
     let size = CGSize(
       width: image.size.width * image.scale,
       height: image.size.height * image.scale)
     let bytesPerPixel: CGFloat = 4.0
     let bytesPerRow = size.width * bytesPerPixel
     self.totalBytes = UInt64(bytesPerRow) * UInt64(size.height)
-  }
-
-  func accessImage() -> UIImage {
-    lastAccessDate = Date()
-    return image
   }
 }

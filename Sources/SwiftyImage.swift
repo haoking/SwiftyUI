@@ -1,12 +1,11 @@
 //
 //  SwiftyImage.swift
-//  WHCWSIFT
+//  SwiftyUI
 //
 //  Created by Haochen Wang on 10/1/17.
 //  Copyright © 2017 Haochen Wang. All rights reserved.
 //
 
-//import CoreGraphics
 import UIKit
 
 extension UIImage {
@@ -19,15 +18,25 @@ extension UIImage {
   }
 
   public final class func load(_ name: String) -> UIImage? {
-    // 真正需要保护的共享状态在 ImageCachePool 内部,由它自己加锁(见 Task 11)。
+    // 真正需要保护的共享状态在 ImageCachePool 内部,由它自己加锁(见 docs/superpowers/plans/2026-07-27-swiftyui-2.0-modernization.md 的 Task 11)。
     let imageCachePool: ImageCachePool = .default
     if let cacheImage = imageCachePool.image(withIdentifier: name) {
       return cacheImage
     }
     guard let oriImage = UIImage(named: name) else { return nil }
-    oriImage.inflate()
-    imageCachePool.add(oriImage, withIdentifier: name)
-    return oriImage
+    // 缓存一张已经解码好的副本:preparingForDisplay()(iOS 15+)返回绘制时无需再解码
+    // 的新图,比 inflate() 那种"把数据读一遍再丢掉"更可靠。图片是这里现建的,调用方
+    // 手里没有原对象,换成副本不影响任何人。拿不到副本时退回 inflate()。
+    let image: UIImage
+    if let decoded = oriImage.preparingForDisplay() {
+      decoded.isInflated = true
+      image = decoded
+    } else {
+      oriImage.inflate()
+      image = oriImage
+    }
+    imageCachePool.add(image, withIdentifier: name)
+    return image
   }
 
   public final class func load(_ aImage: UIImage?, identifier: String) -> UIImage? {
@@ -49,14 +58,8 @@ extension UIImage {
   }
 
   private final var isInflated: Bool {
-    get {
-      guard let obj = objc_getAssociatedObject(self, AssociatedKey.isInflatedKey) as? Bool else {
-
-        self.isInflated = false
-        return self.isInflated
-      }
-      return obj
-    }
+    // 读不到就是没 inflate 过。曾经在这里先写入 false 再读第二遍 —— getter 带副作用。
+    get { (objc_getAssociatedObject(self, AssociatedKey.isInflatedKey) as? Bool) ?? false }
     set {
       objc_setAssociatedObject(
         self, AssociatedKey.isInflatedKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
@@ -69,23 +72,26 @@ extension UIImage {
     _ = cgImage?.dataProvider?.data
   }
 
+  /// 只有确知没有 alpha 通道时才返回 true。
+  ///
+  /// 没有 CGImage(CIImage 背书)时 alpha 无从得知,按不透明处理会让 reSize 开不透明
+  /// 上下文、把透明区涂黑,故保守地返回 false;`.alphaOnly` 只有 alpha 通道,同样不是
+  /// 不透明的。原实现只排除四种带 alpha 的取值,这两种情形都落成了 true。
   public final var isOpaque: Bool {
-
-    let alphaInfo = cgImage?.alphaInfo
-    return
-      !(alphaInfo == .first || alphaInfo == .last || alphaInfo == .premultipliedFirst
-      || alphaInfo == .premultipliedLast)
+    switch cgImage?.alphaInfo {
+    case .none?, .noneSkipFirst?, .noneSkipLast?:
+      return true
+    default:
+      return false
+    }
   }
 
   public final func reSize(to size: CGSize) -> UIImage {
     guard size.width > 0 && size.height > 0 else { return self }
 
-    UIGraphicsBeginImageContextWithOptions(size, isOpaque, 0.0)
-    draw(in: CGRect(origin: .zero, size: size))
-    let scaledImage = UIGraphicsGetImageFromCurrentImageContext() ?? self
-    UIGraphicsEndImageContext()
-
-    return scaledImage
+    return Self.render(size: size, opaque: isOpaque) {
+      draw(in: CGRect(origin: .zero, size: size))
+    }
   }
 
   public final func reSize(toFit size: CGSize) -> UIImage {
@@ -104,12 +110,9 @@ extension UIImage {
     let origin = CGPoint(
       x: (size.width - scaledSize.width) / 2.0, y: (size.height - scaledSize.height) / 2.0)
 
-    UIGraphicsBeginImageContextWithOptions(size, false, 0.0)
-    draw(in: CGRect(origin: origin, size: scaledSize))
-    let scaledImage = UIGraphicsGetImageFromCurrentImageContext() ?? self
-    UIGraphicsEndImageContext()
-
-    return scaledImage
+    return Self.render(size: size, opaque: false) {
+      draw(in: CGRect(origin: origin, size: scaledSize))
+    }
   }
 
   public final func reSize(toFill size: CGSize) -> UIImage {
@@ -128,42 +131,30 @@ extension UIImage {
     let origin = CGPoint(
       x: (size.width - scaledSize.width) / 2.0, y: (size.height - scaledSize.height) / 2.0)
 
-    UIGraphicsBeginImageContextWithOptions(size, isOpaque, 0.0)
-    draw(in: CGRect(origin: origin, size: scaledSize))
-    let scaledImage = UIGraphicsGetImageFromCurrentImageContext() ?? self
-    UIGraphicsEndImageContext()
-
-    return scaledImage
+    return Self.render(size: size, opaque: isOpaque) {
+      draw(in: CGRect(origin: origin, size: scaledSize))
+    }
   }
 
   public final func rounded(
     withCornerRadius radius: CGFloat, divideRadiusByImageScale: Bool = false
   ) -> UIImage {
-    // 与上面三个 reSize 方法同一条守卫:尺寸为零时
-    // UIGraphicsBeginImageContextWithOptions 根本不会创建 context,随后
-    // UIGraphicsGetImageFromCurrentImageContext() 返回 nil —— 原来这里是强解包,
-    // `UIImage().rounded(withCornerRadius: 5)` 直接 trap。同一个文件、同一种风险,
-    // 守了三次、漏了两次。
+    // 与上面三个 reSize 方法同一条守卫:尺寸为零时没有位图可画,原样返回。
+    // (这里曾对 UIGraphicsGetImageFromCurrentImageContext() 强解包,零尺寸时
+    // 根本不会有 context,`UIImage().rounded(withCornerRadius: 5)` 直接 trap。)
     guard size.width > 0 && size.height > 0 else { return self }
 
-    UIGraphicsBeginImageContextWithOptions(size, false, 0.0)
-
     let scaledRadius = divideRadiusByImageScale ? radius / scale : radius
-
-    let clippingPath = UIBezierPath(
-      roundedRect: CGRect(origin: CGPoint.zero, size: size), cornerRadius: scaledRadius)
-    clippingPath.addClip()
-
-    draw(in: CGRect(origin: CGPoint.zero, size: size))
-
-    let roundedImage = UIGraphicsGetImageFromCurrentImageContext() ?? self
-    UIGraphicsEndImageContext()
-
-    return roundedImage
+    return Self.render(size: size, opaque: false) {
+      UIBezierPath(
+        roundedRect: CGRect(origin: CGPoint.zero, size: size), cornerRadius: scaledRadius
+      ).addClip()
+      draw(in: CGRect(origin: CGPoint.zero, size: size))
+    }
   }
 
   public final func roundedIntoCircle() -> UIImage {
-    // 同 rounded(withCornerRadius:):零尺寸时不会有 context,取图返回 nil
+    // 同 rounded(withCornerRadius:):零尺寸时原样返回
     guard size.width > 0 && size.height > 0 else { return self }
 
     let radius = min(size.width, size.height) / 2.0
@@ -174,15 +165,21 @@ extension UIImage {
       squareImage = reSize(toFill: squareSize)
     }
 
-    UIGraphicsBeginImageContextWithOptions(squareImage.size, false, 0.0)
-    let clippingPath = UIBezierPath(
-      roundedRect: CGRect(origin: CGPoint.zero, size: squareImage.size), cornerRadius: radius)
-    clippingPath.addClip()
-    squareImage.draw(in: CGRect(origin: CGPoint.zero, size: squareImage.size))
-    let roundedImage = UIGraphicsGetImageFromCurrentImageContext() ?? self
-    UIGraphicsEndImageContext()
+    return Self.render(size: squareImage.size, opaque: false) {
+      UIBezierPath(
+        roundedRect: CGRect(origin: CGPoint.zero, size: squareImage.size), cornerRadius: radius
+      ).addClip()
+      squareImage.draw(in: CGRect(origin: CGPoint.zero, size: squareImage.size))
+    }
+  }
 
-    return roundedImage
+  /// 按屏幕 scale(等同于 UIGraphicsBeginImageContextWithOptions 传 0)、标准色域出一张图,
+  /// drawing 在 UIKit 的当前上下文里执行。库里的绘图都走这里(SwiftyAlertIcons 也用)。
+  static func render(size: CGSize, opaque: Bool, _ drawing: () -> Void) -> UIImage {
+    let format = UIGraphicsImageRendererFormat()
+    format.opaque = opaque
+    format.preferredRange = .standard
+    return UIGraphicsImageRenderer(size: size, format: format).image { _ in drawing() }
   }
 }
 
@@ -318,7 +315,7 @@ public final class ImageCachePool: ImageCacheable, @unchecked Sendable {
     guard let cachedImage = cachedImages[identifier] else { return nil }
     accessSequenceCounter += 1
     cachedImage.lastAccessSequence = accessSequenceCounter
-    return cachedImage.accessImage()
+    return cachedImage.image
   }
 
   // MARK: - 淘汰
@@ -335,7 +332,7 @@ public final class ImageCachePool: ImageCacheable, @unchecked Sendable {
       ? currentMemoryUsage - _preferredMemoryUsage
       : 0
     // 按访问序号升序:最久未访问的排在最前,优先淘汰。
-    // 用严格单调的整数序号而不是 lastAccessDate 排序,见 CachedImage.lastAccessSequence 的说明。
+    // 用严格单调的整数序号而不是时间戳排序,见 CachedImage.lastAccessSequence 的说明。
     let sorted = cachedImages.values.sorted { $0.lastAccessSequence < $1.lastAccessSequence }
 
     var bytesPurged: UInt64 = 0

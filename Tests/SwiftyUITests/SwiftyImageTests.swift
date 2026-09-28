@@ -83,6 +83,25 @@ final class SwiftyImageTests: XCTestCase {
     XCTAssertFalse(transparent.isOpaque)
   }
 
+  /// 没有 CGImage 的图片(CIImage 背书)无从得知 alpha,不能判为不透明。
+  ///
+  /// isOpaque 曾经只排除四种带 alpha 的 alphaInfo,`cgImage` 为 nil 时一个都不命中,
+  /// 于是返回 true。reSize(to:) / reSize(toFill:) 据此开**不透明**上下文,
+  /// 透明区域被涂成黑色;applyBackgroundImage 也据此把视图标成 opaque。
+  ///
+  /// 判别力:改回原来的表达式,第一条断言失败,缩放结果也变成不透明位图。
+  func testOpaqueDetectionWithoutCGImageIsConservative() {
+    let clear = CIImage(color: CIColor(red: 1, green: 0, blue: 0, alpha: 0))
+      .cropped(to: CGRect(x: 0, y: 0, width: 10, height: 10))
+    let image = UIImage(ciImage: clear)
+    XCTAssertNil(image.cgImage, "前提:CIImage 背书的 UIImage 没有 cgImage,否则本测试无判别力")
+
+    XCTAssertFalse(image.isOpaque, "alpha 未知时不能声称不透明")
+    XCTAssertFalse(
+      image.reSize(to: CGSize(width: 10, height: 10)).isOpaque,
+      "缩放必须保留透明度,不能开不透明上下文把透明区涂黑")
+  }
+
   // MARK: - inflate
 
   func testInflateIsIdempotent() {
