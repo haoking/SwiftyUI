@@ -212,19 +212,6 @@ extension UIImage {
     return (colors.0, colors.1, colors.2, colors.3)
   }
 
-  private final class CountedColor {
-    let color: UIColor
-    let count: Int
-    /// 像素的 0xRRGGBB 打包值,只用于次数相同时的排序,让结果与字典的遍历顺序无关。
-    let key: UInt32
-
-    init(color: UIColor, count: Int, key: UInt32) {
-      self.color = color
-      self.count = count
-      self.key = key
-    }
-  }
-
   private final func getColors() -> (
     background: UIColor, primary: UIColor, secondary: UIColor, detail: UIColor
   ) {
@@ -268,19 +255,21 @@ extension UIImage {
     context.draw(cgImage, in: CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height)))
     let pixels = raw.assumingMemoryBound(to: UInt8.self)
 
-    // 像素打包成 0xRRGGBB 计数,只为出现过的颜色建 UIColor。曾经每个像素都新建一个
-    // UIColor 放进 NSCountedSet(靠 UIColor 的 hash / isEqual 去重),按列遍历行优先的
-    // 缓冲区。像素格式是 ARGB(premultipliedFirst),字节 1…3 是 R、G、B。
-    var edgeCounts: [UInt32: Int] = [:]
-    var imageCounts: [UInt32: Int] = [:]
-    for y in 0..<height {
-      let row = pixels + y * bytesPerRow
-      for x in 0..<width {
-        let pixel = row + x * 4
-        let key = UInt32(pixel[1]) << 16 | UInt32(pixel[2]) << 8 | UInt32(pixel[3])
-        imageCounts[key, default: 0] += 1
-        if x >= 5 && x <= 10 {
-          edgeCounts[key, default: 0] += 1
+    // 像素打包成 0xRRGGBB。像素格式是 ARGB(premultipliedFirst),字节 1…3 是 R、G、B。
+    // 全图的键与背景采样带 x∈[5,10] 的键各收一份,再分别排序计数(见 PixelKeyCounter)。
+    var imageKeys = [UInt32](repeating: 0, count: width * height)
+    var edgeKeys: [UInt32] = []
+    edgeKeys.reserveCapacity(6 * height)
+    imageKeys.withUnsafeMutableBufferPointer { keys in
+      for y in 0..<height {
+        let row = pixels + y * bytesPerRow
+        for x in 0..<width {
+          let pixel = row + x * 4
+          let key = UInt32(pixel[1]) << 16 | UInt32(pixel[2]) << 8 | UInt32(pixel[3])
+          keys[y * width + x] = key
+          if x >= 5 && x <= 10 {
+            edgeKeys.append(key)
+          }
         }
       }
     }
@@ -292,52 +281,50 @@ extension UIImage {
     // B12(排序方向): 该算法要把"出现次数最多"的边缘色当作背景色,
     //                 因此这里必须是降序,取 .first 得到最常见的颜色。
     // 次数相同时按打包值排:字典的遍历顺序逐进程随机,不加这一条结果就不确定。
-    let sortComparator: (CountedColor, CountedColor) -> Bool = { (a, b) -> Bool in
-      a.count != b.count ? a.count > b.count : a.key < b.key
+    // 边缘色只有 6 列,直接排序;全图的候选色交给下面的 PixelColorRanking。
+    let edgeColors = PixelKeyCounter.counts(of: &edgeKeys)
+      .filter { $0.count >= randomColorsThreshold }
+      .sorted { $0.count != $1.count ? $0.count > $1.count : $0.key < $1.key }
+
+    var proposedEdgeColor: UIColor = blackColor
+    var proposedEdgeCount: Int = 1
+    if let first = edgeColors.first {
+      proposedEdgeColor = color(of: first.key)
+      proposedEdgeCount = first.count
     }
 
-    var sortedColors: [CountedColor] = edgeCounts.compactMap { key, count in
-      count >= randomColorsThreshold
-        ? CountedColor(color: color(of: key), count: count, key: key) : nil
-    }
-
-    sortedColors.sort(by: sortComparator)
-
-    var proposedEdgeColor: CountedColor = .init(color: blackColor, count: 1, key: 0)
-
-    if let first = sortedColors.first { proposedEdgeColor = first }
-
-    if proposedEdgeColor.color.isBlackOrWhite && !sortedColors.isEmpty {
+    if proposedEdgeColor.isBlackOrWhite && !edgeColors.isEmpty {
       // B12: 原实现写作 CGFloat(countedColor.count / proposedEdgeColor.count),
       //      先做整数除法再转 CGFloat,结果非 0 即 >= 1,0.3 这个阈值形同虚设。
-      for countedColor in sortedColors
-      where CGFloat(countedColor.count) / CGFloat(proposedEdgeColor.count) > 0.3 {
-        if !countedColor.color.isBlackOrWhite {
-          proposedEdgeColor = countedColor
+      for edgeColor in edgeColors
+      where CGFloat(edgeColor.count) / CGFloat(proposedEdgeCount) > 0.3 {
+        let candidate = color(of: edgeColor.key)
+        if !candidate.isBlackOrWhite {
+          proposedEdgeColor = candidate
           break
         }
       }
     }
 
-    let imageBackgroundColor: UIColor = proposedEdgeColor.color
+    let imageBackgroundColor: UIColor = proposedEdgeColor
     let isDarkBackgound: Bool = imageBackgroundColor.isDark
-
-    // 候选色按原色的出现次数计:曾用提饱和之后新建的颜色去查计数,那个颜色图里从没
-    // 出现过,灰色系恒为 0。
-    sortedColors = imageCounts.compactMap { key, count in
-      let candidate = color(of: key).color(minSaturation: 0.15)
-      guard candidate.isDark == !isDarkBackgound else { return nil }
-      return CountedColor(color: candidate, count: count, key: key)
-    }
-
-    sortedColors.sort(by: sortComparator)
 
     var primaryColor: UIColor?
     var secondaryColor: UIColor?
     var detailColor: UIColor?
 
-    for countedColor in sortedColors {
-      let color: UIColor = countedColor.color
+    // 候选色按次数从高到低逐个弹出,弹出时才建 UIColor、提饱和、过滤明暗,挑满三个就停。
+    // 2.x 先给图里出现过的**每一种**颜色都建 UIColor、提饱和、取分量,再整体排序 ——
+    // 照片常有上万种颜色,而下面的循环通常看前几十个就结束了。过滤与次序无关,所以
+    // "按序弹出再过滤"与"先过滤再排序"得到的序列完全相同,结果逐个不变
+    // (由 SwiftyColorTests.testColorsMatchReferenceImplementation 对拍 2.1.0 证明)。
+    //
+    // 候选色按原色的出现次数计:曾用提饱和之后新建的颜色去查计数,那个颜色图里从没
+    // 出现过,灰色系恒为 0。
+    var ranking = PixelColorRanking(PixelKeyCounter.counts(of: &imageKeys))
+    while let next = ranking.popMostFrequent() {
+      let color: UIColor = color(of: next.key).color(minSaturation: 0.15)
+      guard color.isDark == !isDarkBackgound else { continue }
       if primaryColor == nil && color.isContrasting(with: imageBackgroundColor) {
         primaryColor = color
       } else if secondaryColor == nil && primaryColor != nil
@@ -358,6 +345,95 @@ extension UIImage {
       secondaryColor ?? (isDarkBackgound ? whiteColor : blackColor),
       detailColor ?? (isDarkBackgound ? whiteColor : blackColor)
     )
+  }
+}
+
+/// 给一批 24 位像素键计数。
+private enum PixelKeyCounter {
+  /// 把键排好序并按段计数,返回 (键, 次数),键升序。会打乱 keys 的内容。
+  ///
+  /// 两趟 12 位的 LSD 基数排序:键只有 24 位,两趟正好覆盖;每趟一次计数、一次分配,
+  /// 总共 O(n),没有比较、没有哈希。2.x 用 `[UInt32: Int]` 字典逐像素计数,
+  /// 250×250 的图就是六万多次 SipHash 加探测。
+  static func counts(of keys: inout [UInt32]) -> [(key: UInt32, count: Int)] {
+    guard !keys.isEmpty else { return [] }
+    var scratch = [UInt32](repeating: 0, count: keys.count)
+    for shift: UInt32 in [0, 12] {
+      keys.withUnsafeBufferPointer { source in
+        scratch.withUnsafeMutableBufferPointer { destination in
+          // starts[b] 先数出每个桶的大小,再换成每个桶在 destination 里的起点。
+          var starts = [Int](repeating: 0, count: 4097)
+          for key in source {
+            starts[Int((key >> shift) & 0xFFF) + 1] += 1
+          }
+          for bucket in 1...4096 {
+            starts[bucket] += starts[bucket - 1]
+          }
+          for key in source {
+            let bucket = Int((key >> shift) & 0xFFF)
+            destination[starts[bucket]] = key
+            starts[bucket] += 1
+          }
+        }
+      }
+      swap(&keys, &scratch)
+    }
+
+    var runs: [(key: UInt32, count: Int)] = []
+    var current = keys[0]
+    var count = 0
+    for key in keys {
+      if key == current {
+        count += 1
+      } else {
+        runs.append((current, count))
+        current = key
+        count = 1
+      }
+    }
+    runs.append((current, count))
+    return runs
+  }
+}
+
+/// 候选色的出场顺序:次数降序,次数相同按键升序 —— 与 2.x 排序用的比较器逐项相同。
+///
+/// 实现是一个大顶堆:(次数, 键) 打包成一个 UInt64,高位是次数,低 24 位是
+/// 0xFFFFFF − 键(键越小这个值越大,于是次数相同时键小的先出)。建堆 O(n),
+/// 每弹出一个 O(log n);取色通常弹出几十个就停,省掉了对全部颜色的完整排序。
+private struct PixelColorRanking {
+  private var heap: [UInt64]
+
+  init(_ counts: [(key: UInt32, count: Int)]) {
+    heap = counts.map { UInt64($0.count) << 24 | UInt64(0xFF_FFFF - $0.key) }
+    var parent = heap.count / 2 - 1
+    while parent >= 0 {
+      siftDown(from: parent)
+      parent -= 1
+    }
+  }
+
+  mutating func popMostFrequent() -> (key: UInt32, count: Int)? {
+    guard let top = heap.first else { return nil }
+    let last = heap.removeLast()
+    if !heap.isEmpty {
+      heap[0] = last
+      siftDown(from: 0)
+    }
+    return (UInt32(0xFF_FFFF - (top & 0xFF_FFFF)), Int(top >> 24))
+  }
+
+  private mutating func siftDown(from start: Int) {
+    var parent = start
+    while true {
+      let left = 2 * parent + 1
+      guard left < heap.count else { return }
+      let right = left + 1
+      let larger = right < heap.count && heap[right] > heap[left] ? right : left
+      guard heap[larger] > heap[parent] else { return }
+      heap.swapAt(parent, larger)
+      parent = larger
+    }
   }
 }
 extension UIColor {

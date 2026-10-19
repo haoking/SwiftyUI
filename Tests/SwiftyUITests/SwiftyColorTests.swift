@@ -451,3 +451,136 @@ extension SwiftyColorTests {
     }
   }
 }
+
+// MARK: - 与 2.1.0 取色算法对拍
+
+extension SwiftyColorTests {
+
+  /// 取色结果必须与 2.1.0 的算法逐个相等(参照实现见 ColorExtractionReference.swift)。
+  ///
+  /// 3.0 把逐像素的字典计数换成了基数排序,把"给每一种颜色都建 UIColor 再排序"换成了
+  /// 按次数从高到低逐个弹出、挑满就停。样本专门覆盖了几类容易出错的情形:颜色数接近
+  /// 像素数的长尾(噪点、二维渐变)、次数完全打平只能靠键排序的(等宽两色、灰阶)、
+  /// 边缘主色是黑白而要换成彩色的、透明与半透明、极端宽高比、带 scale 与方向的图。
+  ///
+  /// 判别力:把新实现里次数相同时的键序反过来、或漏掉 isDark 过滤,本测试变红。
+  func testColorsMatchReferenceImplementation() async throws {
+    for (name, image) in Self.equivalenceSamples() {
+      let actual = try await withTestTimeout(60) { try await image.colors() }
+      let expected = image.referenceColors()
+      XCTAssertEqual(actual.background, expected.background, "\(name):background")
+      XCTAssertEqual(actual.primary, expected.primary, "\(name):primary")
+      XCTAssertEqual(actual.secondary, expected.secondary, "\(name):secondary")
+      XCTAssertEqual(actual.detail, expected.detail, "\(name):detail")
+    }
+  }
+
+  private static func equivalenceSamples() -> [(String, UIImage)] {
+    let noise = makePixelImage(width: 64, height: 64) { _, _, rng in
+      UInt32(truncatingIfNeeded: rng.next()) & 0xFF_FFFF
+    }
+    return [
+      ("64×64 噪点", noise),
+      (
+        "250×250 二维渐变,每种颜色只出现一次",
+        makePixelImage(width: 250, height: 250) { x, y, _ in
+          UInt32(x) << 16 | UInt32(y) << 8 | UInt32((x + y) % 256)
+        }
+      ),
+      (
+        "250×250 灰阶,每种灰出现次数相同",
+        makePixelImage(width: 250, height: 250) { x, _, _ in
+          UInt32(x) * 0x01_0101
+        }
+      ),
+      (
+        "250×250 等宽两色,次数打平",
+        makePixelImage(width: 250, height: 250) { x, _, _ in
+          x < 125 ? 0x33_6699 : 0xCC_8844
+        }
+      ),
+      (
+        "250×250 八色调色板噪点",
+        makePixelImage(width: 250, height: 250) { _, _, rng in
+          [0xFF_0000, 0x00_FF00, 0x00_00FF, 0xFF_FF00, 0x00_FFFF, 0xFF_00FF, 0x80_8080, 0x20_2020][
+            Int(rng.next() % 8)]
+        }
+      ),
+      (
+        "250×250 平滑起伏",
+        makePixelImage(width: 250, height: 250) { x, y, _ in
+          let r = UInt32(128 + 100 * sin(Double(x) / 20))
+          let g = UInt32(128 + 100 * cos(Double(y) / 30))
+          return r << 16 | g << 8 | UInt32((x * y) % 256)
+        }
+      ),
+      ("双色", TestSupport.makeTwoToneImage(left: .red, right: .blue)),
+      (
+        "边缘蓝多红少",
+        TestSupport.makeEdgeDiscriminatingImage(
+          majorityEdge: UIColor(red: 0, green: 0, blue: 0.55, alpha: 1),
+          minorityEdge: UIColor(red: 0.55, green: 0, blue: 0, alpha: 1),
+          body: UIColor(red: 1, green: 1, blue: 0.6, alpha: 1))
+      ),
+      (
+        "边缘白多蓝少",
+        TestSupport.makeEdgeDiscriminatingImage(
+          majorityEdge: .white,
+          minorityEdge: UIColor(red: 0.15, green: 0.2, blue: 0.9, alpha: 1),
+          body: UIColor(red: 0.55, green: 0.55, blue: 0.2, alpha: 1))
+      ),
+      ("全透明", TestSupport.makeSolidImage(color: .clear, size: CGSize(width: 64, height: 64))),
+      (
+        "半透明噪点",
+        makePixelImage(width: 64, height: 64, randomAlpha: true) { _, _, rng in
+          UInt32(truncatingIfNeeded: rng.next()) & 0xFF_FFFF
+        }
+      ),
+      ("纯黑", TestSupport.makeSolidImage(color: .black, size: CGSize(width: 64, height: 64))),
+      ("纯白", TestSupport.makeSolidImage(color: .white, size: CGSize(width: 64, height: 64))),
+      (
+        "20×400 细长噪点",
+        makePixelImage(width: 20, height: 400) { _, _, rng in
+          UInt32(truncatingIfNeeded: rng.next()) & 0xFF_FFFF
+        }
+      ),
+      (
+        "400×20 扁长噪点",
+        makePixelImage(width: 400, height: 20) { _, _, rng in
+          UInt32(truncatingIfNeeded: rng.next()) & 0xFF_FFFF
+        }
+      ),
+      ("scale 3", UIImage(cgImage: noise.cgImage!, scale: 3, orientation: .up)),
+      ("方向 .right", UIImage(cgImage: noise.cgImage!, scale: 1, orientation: .right)),
+      ("没有位图", UIImage()),
+    ]
+  }
+
+  /// 按像素生成一张 scale 为 1 的图。pixel 返回 0xRRGGBB;随机数发生器种子固定,
+  /// 每次运行生成的图都相同。
+  private static func makePixelImage(
+    width: Int, height: Int, randomAlpha: Bool = false,
+    _ pixel: (_ x: Int, _ y: Int, _ rng: inout SplitMix64) -> UInt32
+  ) -> UIImage {
+    var rng = SplitMix64(seed: UInt64(width * 7919 + height))
+    var bytes = [UInt8](repeating: 0, count: width * height * 4)
+    for y in 0..<height {
+      for x in 0..<width {
+        let rgb = pixel(x, y, &rng)
+        let offset = (y * width + x) * 4
+        bytes[offset] = UInt8((rgb >> 16) & 0xFF)
+        bytes[offset + 1] = UInt8((rgb >> 8) & 0xFF)
+        bytes[offset + 2] = UInt8(rgb & 0xFF)
+        bytes[offset + 3] = randomAlpha ? UInt8(truncatingIfNeeded: rng.next()) : 0xFF
+      }
+    }
+    let alphaInfo: CGImageAlphaInfo = randomAlpha ? .last : .noneSkipLast
+    let cgImage = CGImage(
+      width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
+      bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+      bitmapInfo: CGBitmapInfo(rawValue: alphaInfo.rawValue),
+      provider: CGDataProvider(data: Data(bytes) as CFData)!,
+      decode: nil, shouldInterpolate: false, intent: .defaultIntent)!
+    return UIImage(cgImage: cgImage)
+  }
+}
