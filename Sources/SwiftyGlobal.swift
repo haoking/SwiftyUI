@@ -26,10 +26,12 @@ public enum SwiftyGlobal {
   /// 1.x 返回非可选并强解包 `UIApplication.shared.keyWindow!`,无窗口时崩溃(B1)。
   /// 2.0 起返回可选,调用方需自行处理 nil。
   public static var keyWindow: UIWindow? {
-    UIApplication.shared.connectedScenes
-      .compactMap { $0 as? UIWindowScene }
-      .first { $0.activationState == .foregroundActive }?
-      .keyWindow
+    // 直接遍历,不先 compactMap 出一个中间数组;screenSize 等派生度量每次都要走这里。
+    for case let scene as UIWindowScene in UIApplication.shared.connectedScenes
+    where scene.activationState == .foregroundActive {
+      return scene.keyWindow
+    }
+    return nil
   }
 
   public static var screenSize: CGSize { keyWindow?.bounds.size ?? .zero }
@@ -55,10 +57,10 @@ public enum SwiftyGlobal {
   public nonisolated static let modelName: String = {
     var systemInfo = utsname()
     uname(&systemInfo)
-    let machineMirror = Mirror(reflecting: systemInfo.machine)
-    let identifier = machineMirror.children.reduce("") { identifier, element in
-      guard let value = element.value as? Int8, value != 0 else { return identifier }
-      return identifier + String(UnicodeScalar(UInt8(value)))
+    // machine 是定长的 CChar 元组,按字节解码到第一个 0 为止。曾用 Mirror 反射
+    // 这个 256 元素的元组,逐个元素拼字符串。
+    let identifier = withUnsafeBytes(of: systemInfo.machine) { bytes in
+      String(decoding: bytes.prefix { $0 != 0 }, as: UTF8.self)
     }
 
     switch identifier {

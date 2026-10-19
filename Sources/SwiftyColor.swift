@@ -25,22 +25,34 @@ extension UIColor {
     return load(r, g, b, A)
   }
 
+  /// 解析 `"#RGB"`、`"RGB"`、`"#RRGGBB"`、`"RRGGBB"`;其余一律返回全透明白色。
+  ///
+  /// 3.0 起直接在 UTF-8 字节上解析,不再分配中间字符串、逐字符插入展开三位串,
+  /// 规则与 2.x 逐条相同:只去掉一个前导 "#";剩下必须恰好 3 或 6 个 **ASCII**
+  /// 十六进制字符 —— 正负号(`UInt(_:radix:)` 曾把 "+FFFFF" 当成 0x0FFFFF)、
+  /// 空白、全角数字(`Character.isHexDigit` 对它们为 true)都拒绝;非法字符
+  /// 也不再有强解包可言(B19)。
   public final class func hex(_ hexString: String, _ alpha: CGFloat = 1.0) -> UIColor {
-    var hex: String = hexString.hasPrefix("#") ? String(hexString.dropFirst()) : hexString
-    guard hex.count == 3 || hex.count == 6 else { return UIColor(white: 1.0, alpha: 0.0) }
-    // 逐字符校验:UInt(_:radix:) 接受前导 "+"/"-","+FFFFF" 会被当成 0x0FFFFF。
-    guard hex.allSatisfy({ $0.isASCII && $0.isHexDigit }) else {
-      return UIColor(white: 1.0, alpha: 0.0)
+    var digits = hexString.utf8[...]
+    if digits.first == UInt8(ascii: "#") { digits = digits.dropFirst() }
+    guard digits.count == 3 || digits.count == 6 else { return UIColor(white: 1.0, alpha: 0.0) }
+
+    var value: UInt = 0
+    for byte in digits {
+      guard let nibble = hexNibble(byte) else { return UIColor(white: 1.0, alpha: 0.0) }
+      // 三位串每位复制一次:"f00" → 0xFF0000。
+      value = digits.count == 3 ? value << 8 | nibble << 4 | nibble : value << 4 | nibble
     }
-    if hex.count == 3 {
-      for (index, char) in hex.enumerated() {
-        hex.insert(char, at: hex.index(hex.startIndex, offsetBy: index * 2))
-      }
-    }
-    // 长度合法不代表字符合法:"zzz" 会展开成 "zzzzzz",UInt(_:radix:) 返回 nil。
-    // 原实现在此处强解包导致崩溃(B19)。
-    guard let value = UInt(hex, radix: 16) else { return UIColor(white: 1.0, alpha: 0.0) }
     return .hex(value, alpha)
+  }
+
+  private static func hexNibble(_ byte: UInt8) -> UInt? {
+    switch byte {
+    case UInt8(ascii: "0")...UInt8(ascii: "9"): return UInt(byte - UInt8(ascii: "0"))
+    case UInt8(ascii: "a")...UInt8(ascii: "f"): return UInt(byte - UInt8(ascii: "a") + 10)
+    case UInt8(ascii: "A")...UInt8(ascii: "F"): return UInt(byte - UInt8(ascii: "A") + 10)
+    default: return nil
+    }
   }
 }
 

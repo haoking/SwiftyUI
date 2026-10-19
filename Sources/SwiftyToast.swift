@@ -131,22 +131,22 @@ public final class SwiftyToast {
           self.toastLabel.alpha = 1
         },
         completion: { _ in
-          UIView.animate(
-            withDuration: 2.5,
-            animations: {
-              self.toastLabel.alpha = 1.0001
-            },
-            completion: { _ in
-              UIView.animate(
-                withDuration: 0.5,
-                animations: {
-                  self.toastLabel.alpha = 0
-                },
-                completion: { _ in
-                  self.toastLabel.removeFromSuperview()
-                  SwiftyToastCenter.default.finish()
-                })
-            })
+          // 停留 2.5s。曾经用一段 alpha 1 → 1.0001 的 2.5s 动画当计时器:画面上没有任何
+          // 变化,Core Animation 却要在整段停留期间逐帧合成,渲染循环没法空闲(XCUITest
+          // 也因此一直等不到 App 空闲)。改成真正的等待。淡入淡出仍用回调式的
+          // UIView.animate —— SDK 给它标了 NS_SWIFT_DISABLE_ASYNC,没有 async 版本。
+          Task {
+            try? await Task.sleep(for: .seconds(2.5))
+            UIView.animate(
+              withDuration: 0.5,
+              animations: {
+                self.toastLabel.alpha = 0
+              },
+              completion: { _ in
+                self.toastLabel.removeFromSuperview()
+                SwiftyToastCenter.default.finish()
+              })
+          }
         })
     }
   }

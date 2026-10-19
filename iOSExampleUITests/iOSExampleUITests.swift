@@ -303,11 +303,12 @@ final class iOSExampleUITests: XCTestCase {
   /// (1.x 的 static var,B17),横屏下拿到的仍是竖屏的 402×874,toast 会被放到
   /// 横屏窗口(874×402)之外。
   ///
-  /// **不覆盖**"旋转过程中已经显示着的那一个 toast 会不会跟着动":XCUITest 设置
-  /// 朝向时会等 App 空闲,而 toast 停留期间恒有一个 2.5s 的 alpha 动画在跑,
-  /// 于是 orientation 的 setter 恰好在这个 toast 停留结束时才返回 —— 旋转做完,
-  /// 这一个 toast 也正好该消失了。这条限制是结构性的,不是时序余量不够。
-  /// 详见本轮报告。
+  /// **不覆盖**"旋转过程中已经显示着的那一个 toast 会不会跟着动",那一半由单元测试
+  /// SwiftyToastTests.testToastLabelReanchorsItselfWhenWindowResizes 覆盖。3.0 之前
+  /// 这里也够不着:toast 停留期间恒有一个 2.5s 的 alpha 动画在跑,XCUITest 设置朝向
+  /// 时要等 App 空闲,orientation 的 setter 恰好在这个 toast 停留结束时才返回。
+  /// 3.0 起停留改成了真正的等待(见 SwiftyToast.show()),停留期间 App 是空闲的;
+  /// 本用例照旧只验证旋转之后新出的那个 toast。
   func testToastFollowsDeviceOrientation() {
     XCTAssertTrue(mainButton.waitForExistence(timeout: 10))
 

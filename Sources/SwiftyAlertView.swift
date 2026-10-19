@@ -73,7 +73,7 @@ public final class SwiftyAlertViewResponder {
 }
 
 private let kCircleHeightBackground: CGFloat = 62.0
-private let uniqueTag: Int = Int(arc4random() % UInt32(Int32.max))
+private let uniqueTag: Int = Int.random(in: 0..<Int(Int32.max))
 private let uniqueAccessibilityIdentifier: String = "SwiftyAlert"
 
 // The Main Class

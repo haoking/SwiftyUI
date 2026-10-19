@@ -85,6 +85,24 @@ final class SwiftyColorTests: XCTestCase {
     XCTAssertEqual(UIColor.hex("#+FF").alphaValue, 0.0, accuracy: 0.001)
   }
 
+  /// 十六进制串解析的边界。3.0 起直接在 UTF-8 字节上解析,接受与拒绝的规则必须与
+  /// 2.x 逐条相同。
+  ///
+  /// 判别力:放过全角数字(`Character.isHexDigit` 对它们为 true)、多剥一个 "#"、
+  /// 或者把空白当分隔符跳过,都会让对应那一条变红。
+  func testHexParsingEdgeCases() {
+    XCTAssertEqual(UIColor.hex("AbC"), UIColor.hex("aabbcc"), "大小写混用的三位串应展开成六位")
+    XCTAssertEqual(UIColor.hex("#AbCdEf").redValue, 0xAB / 255.0, accuracy: 0.001)
+    XCTAssertEqual(UIColor.hex("#AbCdEf").blueValue, 0xEF / 255.0, accuracy: 0.001)
+    for bad in [
+      "", "#", "##fff", " fff", "fff ", "ff f", "ab\r\n", "１２３", "#１２３４５６", "e\u{301}ee",
+      "\u{1F600}ab",
+    ] {
+      XCTAssertEqual(
+        UIColor.hex(bad).alphaValue, 0, accuracy: 0.001, "应拒绝 \(bad.debugDescription)")
+    }
+  }
+
   // MARK: - rgba 取值
 
   func testRGBAFromGrayscaleColorSpace() {

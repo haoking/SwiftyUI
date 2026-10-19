@@ -71,9 +71,9 @@ final class SwiftyToastTests: XCTestCase {
   /// 一个"看起来合理但其实不对"的 mask(例如 .flexibleWidth)会在这里露馅。
   ///
   /// 覆盖不到的那一段:真机旋转时这份 mask 会不会被应用到 window 的直接子视图、
-  /// 以及那一刻 toast 是否确实还挂在 window 上。XCUITest 也够不到 ——
-  /// 设 XCUIDevice.orientation 会等 App 空闲,而 toast 停留期间恒有动画在跑,
-  /// 旋转做完时这个 toast 也正好该消失了(见
+  /// 以及那一刻 toast 是否确实还挂在 window 上。3.0 之前 XCUITest 也够不到 ——
+  /// 设 XCUIDevice.orientation 会等 App 空闲,而 toast 停留期间恒有动画在跑;
+  /// 3.0 起停留改成了真正的等待,但 UI 测试仍只验证旋转之后新出的 toast(见
   /// iOSExampleUITests.testToastFollowsDeviceOrientation 的说明)。
   ///
   /// 判别力:删掉源码里那行 autoresizingMask,label 原地不动,
