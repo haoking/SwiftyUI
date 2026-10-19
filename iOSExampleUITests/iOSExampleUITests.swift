@@ -24,24 +24,32 @@ import XCTest
 /// 不针对控制台输出 —— 控制台输出只有连着 Xcode 才看得见,且无法在进程内断言。
 /// 示例 App 里那几个原本只 `print` 的回调,现在同时把同一条文本写进屏幕上的
 /// EventLog(`print` 一行没删),UI 测试断言的就是这份屏幕状态。
+@MainActor
 final class iOSExampleUITests: XCTestCase {
 
-  private var app: XCUIApplication!
+  /// 用例第一次碰到它时才启动 App。XCTest 为每个用例新建一个实例,所以仍是每个用例
+  /// 启动一次,与原先在 setUp() 里启动等价。
+  ///
+  /// 不在 setUp() 里启动:Xcode 27 的 XCUIAutomation 把 XCUIApplication、XCUIDevice
+  /// 等类型标成了 @MainActor,而 setUp()/tearDown() 继承自 XCTestCase、是非隔离的,
+  /// 在里面创建和启动 App 会得到一串主 actor 隔离告警。Xcode 27 的模板同样是在
+  /// @MainActor 的用例方法里启动 App。
+  private lazy var app: XCUIApplication = {
+    let app = XCUIApplication()
+    app.launch()
+    return app
+  }()
 
   override func setUp() {
     super.setUp()
     continueAfterFailure = false
-    app = XCUIApplication()
-    app.launch()
-  }
-
-  override func tearDown() {
     // 朝向是**进程外**的模拟器状态,不还原会漏给同一次运行里后面的用例。
-    // 放在 tearDown 而不是各用例末尾:用例中途失败时(continueAfterFailure = false
-    // 会直接中止后续代码)也要还原。
-    XCUIDevice.shared.orientation = .portrait
-    app = nil
-    super.tearDown()
+    // 用 teardown block 而不是在各用例末尾还原:用例中途失败时(continueAfterFailure
+    // = false 会直接中止后续代码)也要还原。这个重载的闭包是 @MainActor 的,
+    // 可以直接设置 XCUIDevice。
+    addTeardownBlock { @MainActor in
+      XCUIDevice.shared.orientation = .portrait
+    }
   }
 
   // MARK: - 元素
