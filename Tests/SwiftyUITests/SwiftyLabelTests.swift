@@ -251,6 +251,40 @@ final class SwiftyLabelTests: XCTestCase {
     }
   }
 
+  // MARK: - 赋值时拷贝
+
+  /// attributedText、paragraphStyle、shadow 在赋值时拷贝,之后就地修改原对象不影响 label。
+  ///
+  /// 这是 UILabel 的语义(它的 attributedText 是 copy 属性)。3.0 起 SwiftyLabel 缓存了
+  /// 文本存储,若不拷贝,调用方就地改了赋进来的可变对象,缓存却不知道:文本停在旧内容,
+  /// 改过的段落样式要等别的属性变了才生效。2.x 每次绘制都重读这些对象,所以从没暴露过。
+  ///
+  /// 判别力:去掉这三个属性上的 @NSCopying,三条断言都变红。
+  func testAssignedMutableTextObjectsAreCopied() {
+    let label = SwiftyLabel()
+    let probe = CGSize(width: 120, height: CGFloat.greatestFiniteMagnitude)
+
+    let text = NSMutableAttributedString(string: "short")
+    label.attributedText = text
+    let sizeBefore = label.sizeThatFits(probe)
+    text.append(
+      NSAttributedString(string: " and a much longer tail that has to wrap onto more lines"))
+    XCTAssertEqual(label.attributedText?.string, "short", "就地修改赋进来的属性串,不应改变 label 的文本")
+    XCTAssertEqual(label.sizeThatFits(probe), sizeBefore)
+
+    let style = NSMutableParagraphStyle()
+    style.lineSpacing = 2
+    label.paragraphStyle = style
+    style.lineSpacing = 20
+    XCTAssertEqual(label.paragraphStyle.lineSpacing, 2, "就地修改赋进来的段落样式,不应改变 label")
+
+    let shadow = NSShadow()
+    shadow.shadowBlurRadius = 1
+    label.shadow = shadow
+    shadow.shadowBlurRadius = 9
+    XCTAssertEqual(label.shadow?.shadowBlurRadius, 1, "就地修改赋进来的阴影,不应改变 label")
+  }
+
   // MARK: - 常驻文本存储的缓存不能过期
 
   /// 同一个 label 连续改属性,每一步的尺寸与绘制像素都必须与"用同样属性新建的 label"一致。

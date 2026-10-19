@@ -64,21 +64,24 @@ public class SwiftyLabel: UIView, TextEditable {
     }
   }
 
-  public var paragraphStyle: NSParagraphStyle = .default {
+  // 下面三个属性赋值时拷贝(@NSCopying),与 UILabel 的 attributedText 是 copy 属性同一语义:
+  // 文本存储是缓存的(见 textStorage),调用方事后就地修改自己赋进来的可变对象,缓存无从
+  // 知晓。拷贝之后,改原对象对 label 没有影响,要生效就重新赋值。
+  @NSCopying public var paragraphStyle: NSParagraphStyle = .default {
     didSet {
       textStorageIsStale = true
       textLayoutDidChange()
     }
   }
 
-  public var shadow: NSShadow? = nil {
+  @NSCopying public var shadow: NSShadow? = nil {
     didSet {
       textStorageIsStale = true
       setNeedsDisplay()
     }
   }
 
-  public var attributedText: NSAttributedString? = nil {
+  @NSCopying public var attributedText: NSAttributedString? = nil {
     didSet {
       textStorageIsStale = true
       textLayoutDidChange()
