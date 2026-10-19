@@ -196,42 +196,12 @@ public final class ImageCachePool: ImageCacheable, Sendable {
   public static var defalut: ImageCachePool { `default` }
 
   private struct State {
-    var cachedImages: [String: CachedImage] = [:]
-    var currentMemoryUsage: UInt64 = 0
+    var images = ImageLRU()
     var memoryCapacity: UInt64 = 100_000_000
     var preferredMemoryUsage: UInt64 = 60_000_000
-    // CachedImage.lastAccessSequence 的发号器。
-    var accessSequenceCounter: UInt64 = 0
     // block 形式注册的观察者由返回的 token 代表,removeObserver(self) 不生效(B18)。
     // 只在 init 末尾写一次、deinit 里读一次;放在锁里,整个类型才能由编译器验证 Sendable。
     var memoryWarningObserver: (any NSObjectProtocol)?
-
-    mutating func purgeIfNeeded() {
-      guard currentMemoryUsage > memoryCapacity else { return }
-
-      // 钳住下限:preferredMemoryUsage 可能被调用方设得比 memoryCapacity 还大
-      // (两个 setter 互不校验),此时 currentMemoryUsage 可能高于 capacity(触发
-      // 淘汰)却低于 preferred,不钳制就会在这里 UInt64 下溢 trap(B5)。
-      let bytesToPurge =
-        currentMemoryUsage >= preferredMemoryUsage
-        ? currentMemoryUsage - preferredMemoryUsage
-        : 0
-      // 按访问序号升序:最久未访问的排在最前,优先淘汰。
-      // 用严格单调的整数序号而不是时间戳排序,见 CachedImage.lastAccessSequence 的说明。
-      let sorted = cachedImages.values.sorted { $0.lastAccessSequence < $1.lastAccessSequence }
-
-      var bytesPurged: UInt64 = 0
-      for cachedImage in sorted {
-        cachedImages.removeValue(forKey: cachedImage.identifier)
-        bytesPurged += cachedImage.totalBytes
-        if bytesPurged >= bytesToPurge { break }
-      }
-
-      currentMemoryUsage =
-        currentMemoryUsage >= bytesPurged
-        ? currentMemoryUsage - bytesPurged
-        : 0
-    }
   }
 
   // 一把锁保护全部状态。缓存操作的临界区都很短,比 1.x 的并发队列 + barrier/sync
@@ -276,7 +246,7 @@ public final class ImageCachePool: ImageCacheable, Sendable {
   }
 
   public var memoryUsage: UInt64 {
-    state.withLock { $0.currentMemoryUsage }
+    state.withLock { $0.images.memoryUsage }
   }
 
   // MARK: - 存取
@@ -287,53 +257,26 @@ public final class ImageCachePool: ImageCacheable, Sendable {
   /// 2.0 起同步完成,行为可预测。
   public func add(_ image: UIImage, withIdentifier identifier: String) {
     state.withLock { state in
-      let cachedImage = CachedImage(image, identifier: identifier)
-      if let previous = state.cachedImages[identifier] {
-        state.currentMemoryUsage =
-          state.currentMemoryUsage >= previous.totalBytes
-          ? state.currentMemoryUsage - previous.totalBytes
-          : 0
-      }
-      state.accessSequenceCounter += 1
-      cachedImage.lastAccessSequence = state.accessSequenceCounter
-      state.cachedImages[identifier] = cachedImage
-      state.currentMemoryUsage += cachedImage.totalBytes
-
-      state.purgeIfNeeded()
+      state.images.insert(image, for: identifier)
+      state.images.purge(toFit: state.memoryCapacity, preferred: state.preferredMemoryUsage)
     }
   }
 
   @discardableResult
   public func removeImage(withIdentifier identifier: String) -> Bool {
-    state.withLock { state in
-      guard let cachedImage = state.cachedImages.removeValue(forKey: identifier) else {
-        return false
-      }
-      // 1.x 直接做 UInt64 减法,计数一旦漂移就 trap(B5)
-      state.currentMemoryUsage =
-        state.currentMemoryUsage >= cachedImage.totalBytes
-        ? state.currentMemoryUsage - cachedImage.totalBytes
-        : 0
-      return true
-    }
+    state.withLock { $0.images.remove(identifier) }
   }
 
   @discardableResult
   public func removeAllImages() -> Bool {
     state.withLock { state in
-      guard !state.cachedImages.isEmpty else { return false }
-      state.cachedImages.removeAll()
-      state.currentMemoryUsage = 0
+      guard !state.images.isEmpty else { return false }
+      state.images.removeAll()
       return true
     }
   }
 
   public func image(withIdentifier identifier: String) -> UIImage? {
-    state.withLock { state in
-      guard let cachedImage = state.cachedImages[identifier] else { return nil }
-      state.accessSequenceCounter += 1
-      cachedImage.lastAccessSequence = state.accessSequenceCounter
-      return cachedImage.image
-    }
+    state.withLock { $0.images.image(for: identifier) }
   }
 }
