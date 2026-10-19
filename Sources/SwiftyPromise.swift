@@ -7,8 +7,9 @@
 //
 
 import Foundation
+import Synchronization
 
-public enum ThreadPerform: Int {
+public enum ThreadPerform: Int, Sendable {
   case main
   case background
 }
@@ -38,26 +39,21 @@ public enum PromiseError: Error, Sendable, Equatable {
 /// Foundation 保证 completionBlock 在 operation 结束之后运行,因此在
 /// completionBlock 里读到的 didRun 一定反映了执行块是否跑过。
 ///
-/// @unchecked Sendable 的理由与 ResumeGuard 一致:唯一的可变状态只经由
-/// lock 保护的临界区读写,编译器无法验证,故为 unchecked。
-private final class RunFlag: @unchecked Sendable {
-  private let lock = NSLock()
-  private var value = false
+/// 3.0 起是一个 `Atomic<Bool>`:执行块里 release 写,completionBlock 里 acquire 读,
+/// 不需要锁;类型因此是编译器可以验证的 Sendable(2.x 是 NSLock + @unchecked Sendable)。
+private final class RunFlag: Sendable {
+  private let ran = Atomic<Bool>(false)
 
   func markRun() {
-    lock.lock()
-    defer { lock.unlock() }
-    value = true
+    ran.store(true, ordering: .releasing)
   }
 
   var didRun: Bool {
-    lock.lock()
-    defer { lock.unlock() }
-    return value
+    ran.load(ordering: .acquiring)
   }
 }
 
-private struct PromiseTask {
+private struct PromiseTask: Sendable {
   let identifier: String?
   let perform: ThreadPerform
   let op: Operation
@@ -92,7 +88,7 @@ private struct PromiseTask {
 
 /// fire() 在临界区内算出的下一步动作。
 /// 放在文件作用域而不是 fire() 内部:Swift 不允许在泛型函数里嵌套类型声明。
-private enum PromiseNext {
+private enum PromiseNext: Sendable {
   case run(PromiseTask)
   case finish([PromiseTask])
   case nothing
@@ -102,13 +98,10 @@ private enum PromiseNext {
 ///
 /// - `T: Sendable`:链条会把 T 在线程之间搬运(某个任务里 `update(...)` 写入,
 ///   后续任务可能在另一个线程读出),因此 T 必须能安全跨线程。
-/// - `@unchecked Sendable`:下方全部可变状态一律经 `withState`(即
-///   `stateQueue.sync`)读写,线程安全由这把串行队列保证 —— 编译器无法验证
-///   这一点,故为 unchecked。与 ImageCachePool、SwiftyThreadPool 同一模式。
-public final class Promise<T: Sendable>: @unchecked Sendable {
-  /// 保护下方全部可变状态。所有临界区都很短,串行队列足够,不需要更复杂的方案。
-  private let stateQueue = DispatchQueue(label: "me.haoking.SwiftyPromise.state")
-
+/// - `Sendable`:全部可变状态都收在 `state` 这一把 Mutex 里,线程安全由编译器
+///   验证。2.x 用的是串行 DispatchQueue + `@unchecked Sendable`:每个临界区都要走
+///   一遍 libdispatch 的 `sync`,而且编译器看不见那把队列保护的是什么。
+public final class Promise<T: Sendable>: Sendable {
   /// 承载 `.background` 任务的线程池。
   ///
   /// internal 且默认是共享单例:公开 API 完全看不到这个参数,行为与 2.0 一致。
@@ -121,62 +114,67 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
   /// 记的那种"链条永远无法终结"的情形下,整条链连同这个池一起泄漏。
   internal let pool: SwiftyThreadPool
 
-  private var tasks: [PromiseTask] = []
-  private var alwaysTasks: [PromiseTask] = []
-  /// 调用方经 `catch(_:)` 登记的错误处理器。替换语义,由调用方独占。
-  private var errorBlock: (@Sendable (any Error) -> Void)?
-  /// 库内部自己的错误处理器,与 `errorBlock` **完全分开的一个槽位**。
+  /// 全部可变状态。每个临界区都只读写几个字段,无竞争时加解锁只是一次原子操作。
   ///
-  /// 目前唯一的使用者是 `value()`:它需要在出错时恢复自己的 continuation。
-  /// 两个槽位分开,是为了让调用方的 `catch(_:)` 与库内部的 `value()` 互不干扰
-  /// —— 无论两者以什么顺序被调用:
-  ///
-  /// - `catch(_:)` 之后 `value()`:value() 不去碰 errorBlock,调用方登记的处理器
-  ///   完好无损(它曾经被 value() 内部转手调用 catch(_:) 静默覆盖掉)。
-  /// - `value()` 之后 `catch(_:)`:catch(_:) 只写 errorBlock,碰不到这个槽位,
-  ///   value() 的 continuation 仍然会被恢复(否则那个 await 永远挂起)。
-  ///
-  /// 因此 `catch(_:)` 的公开语义(替换)一个字都不用改。
-  private var internalErrorHandler: (@Sendable (any Error) -> Void)?
-  /// 终结这条链的错误;nil 表示至今没有出过错。
-  ///
-  /// 它同时充当原先那个独立的 `isError` 标志(fire() 据此丢弃剩余任务)——
-  /// "出过错"与"出的是哪个错"是同一个事实,分成两处存只会给它们留出走散的机会。
-  ///
-  /// 把错误**留下来**是必需的,不只是为了诊断:value() 若在 markError 读过
-  /// 槽位之后才登记自己的内部处理器,那次调用永远不会到达它,此时唯一还能交给
-  /// 调用方的就是这里存下的错误(见 registerValueWaiter)。
-  ///
-  /// 首次写入即定:后来的 markError 不顶替它 —— 真正终结链条、并被两个槽位的
-  /// 处理器实际收到的是第一个错误。
-  private var error: (any Error)?
-  private var isStarted: Bool = false
-  private var isFinished: Bool = false
-  private var value: T?
+  /// 临界区的划分与 2.x 的 `stateQueue.sync` 一一对应 —— registerValueWaiter 与
+  /// markError 的正确性论证依赖"哪几件事在同一个临界区里完成",换锁时一个都没有
+  /// 合并或拆开。
+  private let state = Mutex(State())
 
-  // MARK: - 状态访问(全部经由 stateQueue)
-
-  private func withState<R>(_ body: () -> R) -> R {
-    return stateQueue.sync(execute: body)
+  private struct State {
+    var tasks: [PromiseTask] = []
+    var alwaysTasks: [PromiseTask] = []
+    /// 调用方经 `catch(_:)` 登记的错误处理器。替换语义,由调用方独占。
+    var errorBlock: (@Sendable (any Error) -> Void)?
+    /// 库内部自己的错误处理器,与 `errorBlock` **完全分开的一个槽位**。
+    ///
+    /// 目前唯一的使用者是 `value()`:它需要在出错时恢复自己的 continuation。
+    /// 两个槽位分开,是为了让调用方的 `catch(_:)` 与库内部的 `value()` 互不干扰
+    /// —— 无论两者以什么顺序被调用:
+    ///
+    /// - `catch(_:)` 之后 `value()`:value() 不去碰 errorBlock,调用方登记的处理器
+    ///   完好无损(它曾经被 value() 内部转手调用 catch(_:) 静默覆盖掉)。
+    /// - `value()` 之后 `catch(_:)`:catch(_:) 只写 errorBlock,碰不到这个槽位,
+    ///   value() 的 continuation 仍然会被恢复(否则那个 await 永远挂起)。
+    ///
+    /// 因此 `catch(_:)` 的公开语义(替换)一个字都不用改。
+    var internalErrorHandler: (@Sendable (any Error) -> Void)?
+    /// 终结这条链的错误;nil 表示至今没有出过错。
+    ///
+    /// 它同时充当原先那个独立的 `isError` 标志(fire() 据此丢弃剩余任务)——
+    /// "出过错"与"出的是哪个错"是同一个事实,分成两处存只会给它们留出走散的机会。
+    ///
+    /// 把错误**留下来**是必需的,不只是为了诊断:value() 若在 markError 读过
+    /// 槽位之后才登记自己的内部处理器,那次调用永远不会到达它,此时唯一还能交给
+    /// 调用方的就是这里存下的错误(见 registerValueWaiter)。
+    ///
+    /// 首次写入即定:后来的 markError 不顶替它 —— 真正终结链条、并被两个槽位的
+    /// 处理器实际收到的是第一个错误。
+    var error: (any Error)?
+    var isStarted: Bool = false
+    var isFinished: Bool = false
+    var value: T?
+    /// 仅供测试的注入点,生产路径上恒为 nil。见 debugSetValueRegistrationHook(_:)。
+    var valueRegistrationHook: (@Sendable () -> Void)?
   }
+
+  // MARK: - 状态访问(全部经由 state 这把 Mutex)
 
   private func markError(_ error: any Error) {
     // errorBlock 是用户代码,可能回头访问本 Promise,故取出后在临界区外调用。
     // 也正因为在临界区外,它跑在"出错的那个 operation 所在的线程"上
     // (.background 时是 SwiftyThreadPool,.main 时是 OperationQueue.main),
     // 所以 errorBlock 必须是 @Sendable 的 —— 详见 catch(_:) 的说明。
-    let handlers:
-      (user: (@Sendable (any Error) -> Void)?, internal: (@Sendable (any Error) -> Void)?) =
-        withState {
-          // 存错误与读槽位在**同一个**临界区内完成,这是 registerValueWaiter
-          // 那边的判据能成立的前提:stateQueue 是串行的,因此对任何一次 value()
-          // 的注册来说,二者只有两种相对顺序 —— 要么注册在前(这里读到的槽位里
-          // 就有它的处理器),要么这里在前(注册那边读到 self.error 非 nil,
-          // 直接以这个错误恢复)。中间没有第三种可能,也就没有"错误谁都没收到"
-          // 的窗口。
-          if self.error == nil { self.error = error }
-          return (self.errorBlock, self.internalErrorHandler)
-        }
+    let handlers = state.withLock { state in
+      // 存错误与读槽位在**同一个**临界区内完成,这是 registerValueWaiter
+      // 那边的判据能成立的前提:临界区彼此互斥,因此对任何一次 value()
+      // 的注册来说,二者只有两种相对顺序 —— 要么注册在前(这里读到的槽位里
+      // 就有它的处理器),要么这里在前(注册那边读到 state.error 非 nil,
+      // 直接以这个错误恢复)。中间没有第三种可能,也就没有"错误谁都没收到"
+      // 的窗口。
+      if state.error == nil { state.error = error }
+      return (user: state.errorBlock, internal: state.internalErrorHandler)
+    }
     // 顺序有意义:先调用方的,再库内部的。内部那个(value() 的)会恢复
     // continuation,一旦恢复,await 处的代码就可能立刻继续往下跑;先跑调用方的
     // 处理器,才能保证 `await value()` 返回时它已经执行完毕,而不是留下一个
@@ -186,11 +184,11 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
   }
 
   private func update(_ newValue: T?) {
-    withState { self.value = newValue }
+    state.withLock { $0.value = newValue }
   }
 
   private var currentValue: T? {
-    return withState { self.value }
+    state.withLock { $0.value }
   }
 
   // MARK: - 任务构建
@@ -239,14 +237,16 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
 
   // MARK: - 构造
 
-  // init 期间还没有第二个线程能看到 self,直接写 tasks 是安全的
+  // 第一个任务的 operation 要弱引用 self,只能等 self 初始化完再建,所以首个任务
+  // 也走一次加锁追加。init 期间没有第二个线程能看到 self,这把锁不会有竞争。
   private init(
     pool: SwiftyThreadPool, _ identifier: String? = nil,
     _ perform: ThreadPerform = .background, _ work: (@Sendable () throws -> Void)?
   ) {
     self.pool = pool
     let built = operationBuild(work)
-    tasks.append(PromiseTask(identifier, perform, built.op, runFlag: built.flag))
+    let first = PromiseTask(identifier, perform, built.op, runFlag: built.flag)
+    state.withLock { $0.tasks.append(first) }
   }
 
   private init(
@@ -256,7 +256,8 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
   ) {
     self.pool = pool
     let built = operationBuildT(work)
-    tasks.append(PromiseTask(identifier, perform, built.op, runFlag: built.flag))
+    let first = PromiseTask(identifier, perform, built.op, runFlag: built.flag)
+    state.withLock { $0.tasks.append(first) }
   }
 
   @discardableResult
@@ -389,7 +390,7 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
   ///   `internalErrorHandler` 里,两者互不影响;因此 `catch(_:)` 与 `value()`
   ///   无论谁先谁后,都不会破坏对方(见 internalErrorHandler 的说明)。
   public func `catch`(_ errorBlock: (@Sendable (any Error) -> Void)? = nil) {
-    withState { self.errorBlock = errorBlock }
+    state.withLock { $0.errorBlock = errorBlock }
     beginIfNeeded()
   }
 
@@ -416,7 +417,7 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
   /// 临界区,链条若恰好在两者之间出错,markError 读到的 internalErrorHandler
   /// 还是 nil,**这个错误抵达不了任何人**;随后 fire() 的 .finish 分支照常跑
   /// value() 的 always 任务,以 self.currentValue 恢复 continuation —— 调用方
-  /// 拿到一个静默的错误结果。窗口很窄,但 stateQueue 一有争用就会变宽,且
+  /// 拿到一个静默的错误结果。窗口很窄,但锁一有争用就会变宽,且
   /// "另一个终结符已经把链条推进在飞"是这条路径的常规触发条件(start() 之后
   /// value()、catch(_:) 之后 value()、两个并发的 value())。
   /// 回归测试:testValueRegistrationDoesNotSwallowConcurrentChainError。
@@ -428,26 +429,23 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
     _ alwaysTask: PromiseTask,
     onError handler: @escaping @Sendable (any Error) -> Void
   ) -> ValueRegistration {
-    withState {
+    state.withLock { state in
       // 先判错误,再判终结:出过错就一定会走到终结,反过来不成立,而调用方
       // 想知道的是那个错误,不是错误发生前留在链条上的那个值。
-      if let error = self.error { return .failed(error) }
-      guard !isFinished else { return .settled }
-      alwaysTasks.append(alwaysTask)
-      guard let existing = self.internalErrorHandler else {
-        self.internalErrorHandler = handler
+      if let error = state.error { return .failed(error) }
+      guard !state.isFinished else { return .settled }
+      state.alwaysTasks.append(alwaysTask)
+      guard let existing = state.internalErrorHandler else {
+        state.internalErrorHandler = handler
         return .registered
       }
-      self.internalErrorHandler = { error in
+      state.internalErrorHandler = { error in
         existing(error)
         handler(error)
       }
       return .registered
     }
   }
-
-  /// 仅供测试的注入点,生产路径上恒为 nil。见 debugSetValueRegistrationHook(_:)。
-  private var valueRegistrationHook: (@Sendable () -> Void)?
 
   /// 仅供测试:装一个在 `value()` 走完 registerValueWaiter、尚未
   /// `beginIfNeeded()` 时调用的闭包。
@@ -466,7 +464,7 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
   /// 论证(见二者的注释),这个测试是佐证而非全部保障。改动登记的临界区结构时,
   /// 请连这个钩子的位置一起想。
   internal func debugSetValueRegistrationHook(_ hook: (@Sendable () -> Void)?) {
-    withState { self.valueRegistrationHook = hook }
+    state.withLock { $0.valueRegistrationHook = hook }
   }
 
   /// 终结链条并以 await 取回最终值。
@@ -590,7 +588,7 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
 
       // 仅供测试的注入点,生产路径上恒为 nil。放在这里而不是别处:它要撑开的
       // 正是"登记刚刚完成"这一格。
-      withState { self.valueRegistrationHook }?()
+      state.withLock { $0.valueRegistrationHook }?()
 
       switch registration {
       case .registered:
@@ -623,9 +621,9 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
   /// 完成。返回 false 表示链条已经终结(isFinished),此时 alwaysTasks
   /// 不会再被 fire() 排空,调用方不能指望这个任务将来会被执行。
   private func appendAlwaysIfUnfinished(_ task: PromiseTask) -> Bool {
-    withState {
-      guard !isFinished else { return false }
-      alwaysTasks.append(task)
+    state.withLock { state in
+      guard !state.isFinished else { return false }
+      state.alwaysTasks.append(task)
       return true
     }
   }
@@ -637,9 +635,9 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
   /// 与 appendAlwaysIfUnfinished 同一条理由:先查后加只是把竞争窗口缩小,
   /// 而不是消除。
   private func appendTaskIfUnfinished(_ task: PromiseTask) -> Bool {
-    withState {
-      guard !isFinished else { return false }
-      tasks.append(task)
+    state.withLock { state in
+      guard !state.isFinished else { return false }
+      state.tasks.append(task)
       return true
     }
   }
@@ -662,9 +660,9 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
   /// 终结只生效一次:重复调用 start()/catch(),或两者都调用,都不会二次推进链条
   /// ——否则两次 fire() 会并发跑同一条链上的两个任务。
   private func beginIfNeeded() {
-    let shouldFire: Bool = withState {
-      guard !isStarted else { return false }
-      isStarted = true
+    let shouldFire = state.withLock { state in
+      guard !state.isStarted else { return false }
+      state.isStarted = true
       return true
     }
     guard shouldFire else { return }
@@ -677,27 +675,27 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
     // 决策全部在一个临界区里完成(取出任务的同时就把它移出队列),
     // 动作则放到临界区之外。两个线程因此不可能拿到同一个 task,
     // 也就不会把同一个 operation 二次投递(B7)。
-    let next: PromiseNext = withState {
-      guard !isFinished else { return .nothing }
+    let next: PromiseNext = state.withLock { state in
+      guard !state.isFinished else { return .nothing }
 
-      if self.error != nil {
+      if state.error != nil {
         // 出错:丢弃剩余任务,直接进入终结
-        tasks.removeAll()
-        isFinished = true
-        let pending = alwaysTasks
-        alwaysTasks.removeAll()
+        state.tasks.removeAll()
+        state.isFinished = true
+        let pending = state.alwaysTasks
+        state.alwaysTasks.removeAll()
         return .finish(pending)
       }
 
-      if let task = tasks.first {
-        tasks.removeFirst()
+      if let task = state.tasks.first {
+        state.tasks.removeFirst()
         return .run(task)
       }
 
       // 正常跑完
-      isFinished = true
-      let pending = alwaysTasks
-      alwaysTasks.removeAll()
+      state.isFinished = true
+      let pending = state.alwaysTasks
+      state.alwaysTasks.removeAll()
       return .finish(pending)
     }
 
@@ -767,19 +765,14 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
 
 /// 保证 CheckedContinuation 只被恢复一次。
 ///
-/// @unchecked Sendable 是安全的:claimed 只经由 lock 保护的临界区读写,
-/// 与 Promise、ImageCachePool、SwiftyThreadPool 同一模式——线程安全靠
-/// 互斥同步保证,编译器无法验证这一点,故为 unchecked。
-private final class ResumeGuard: @unchecked Sendable {
-  private let lock = NSLock()
-  private var claimed = false
+/// 3.0 起用一次 compare-exchange 完成"判断并占用",无锁;类型因此是编译器可以
+/// 验证的 Sendable(2.x 是 NSLock + @unchecked Sendable)。
+private final class ResumeGuard: Sendable {
+  private let claimed = Atomic<Bool>(false)
 
   /// 首次调用返回 true,之后一律返回 false。
   func claim() -> Bool {
-    lock.lock()
-    defer { lock.unlock() }
-    guard !claimed else { return false }
-    claimed = true
-    return true
+    claimed.compareExchange(expected: false, desired: true, ordering: .acquiringAndReleasing)
+      .exchanged
   }
 }
