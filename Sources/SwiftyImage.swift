@@ -189,12 +189,6 @@ public final class ImageCachePool: ImageCacheable, Sendable {
     return ImageCachePool()
   }()
 
-  @available(
-    *, deprecated, renamed: "default",
-    message: "拼写错误,2.0 起改为 default。旧名将在下个大版本移除。"
-  )
-  public static var defalut: ImageCachePool { `default` }
-
   private struct State {
     var images = ImageLRU()
     var memoryCapacity: UInt64 = 100_000_000

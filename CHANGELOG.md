@@ -1,5 +1,45 @@
 # Changelog
 
+## 3.0.0
+
+The Xcode 27 release. The minimum deployment target is now iOS 18.0 and the package needs a Swift 6.2 compiler (Xcode 26.0 or later). This is a breaking upgrade from 2.1.0 — see **Breaking Changes** below and **Migration from 2.x to 3.0** in the README.
+
+Most of this release is performance work, and none of it changes an observable result. Each rewrite is pinned by a differential test that runs the new code and a frozen copy of the 2.1.0 algorithm it replaces on the same inputs and requires identical output, and each differential test was checked by breaking the new code on purpose (mutation checks) to confirm that it turns red.
+
+### Breaking Changes
+
+| Change | Migration |
+| --- | --- |
+| Minimum deployment target raised from iOS 15.0 to iOS 18.0 | The library now uses `Mutex` and `Atomic` from the Synchronization module, which first shipped in iOS 18 |
+| A Swift 6.2 compiler (Xcode 26.0+) is required | `Package.swift` declares `swift-tools-version: 6.2`. CocoaPods has no equivalent check, so `Sources/SwiftyGlobal.swift` turns an older compiler into one readable `#error` instead of a wall of syntax errors |
+| `ImageCachePool.defalut` and `SwiftyThreadPool.defalut` removed | Use `.default`. Both had been deprecated, with a rename fix-it, since 2.0 |
+| `ClosureVoidWrapper` removed | The library never used it. Use `ClosureWrapper` |
+| `SwiftyAppearance`'s initializer no longer takes `kWindowHeight`, `kTextHeight` or `dynamicAnimatorActive` | Delete those arguments. None of them has had any effect since 2.0 |
+
+### Fixed
+
+- **The example app no longer crashes on launch on iOS 27.** iOS 27 traps any app built with the iOS 27 SDK that has not adopted the UIScene life cycle (`_UIApplicationEvaluateRuntimeIssueForNoSceneLifecycleAdoption`), and `iOSExample` still had its 2017 `AppDelegate` + `window` setup. Five of the six UI tests failed and the app-hosted `iOSExampleTests` could not run at all; CI stayed green only because it builds the example without launching it. The app now has a `SceneDelegate` and a scene manifest, and the five application life-cycle methods that iOS 26 deprecated are gone from its `AppDelegate`.
+
+### Changed
+
+- **`Promise` keeps its state behind a `Mutex`.** 2.x guarded every critical section with `sync` on a serial `DispatchQueue`. An uncontended `Mutex` lock is a single atomic operation with the lock stored inline. The critical sections are exactly the ones 2.1 had — none merged, none split — because the correctness arguments in `registerValueWaiter` and `markError` depend on which steps share one. The two single-flag helpers became lock-free: the "did this block run" flag is an `Atomic<Bool>` written with release and read with acquire ordering, and the "resume the continuation once" guard is one compare-exchange.
+- **`SwiftyThreadPool` and `ImageCachePool` use `Mutex` instead of `NSLock`.** No Objective-C message send per lock and unlock. Each memory-warning observer token now lives inside the locked state as well.
+- **`Promise`, `SwiftyThreadPool` and `ImageCachePool` are now checked `Sendable`** instead of `@unchecked Sendable`, so the compiler verifies their thread safety. `ThreadPerform` gained a `Sendable` conformance along the way. All of this is source compatible.
+- **`ImageCachePool` evicts in O(1) per entry.** 2.x sorted every entry by its access counter whenever the cache went over capacity — inside the lock, and on every `add` once the cache was full. The cache is now a dictionary plus a doubly linked list whose nodes live in one contiguous array and link to each other by index, so list updates cost no reference counting and freed slots are reused. The eviction rule is unchanged to the letter: entries are removed oldest first, the check comes after each removal (so going over capacity always evicts at least one entry), and the newest entry is evicted too if that is what it takes.
+- **`UIImage.colors()` counts and ranks colours without hashing or full sorting.** 2.x counted the pixels of the 250-pixel-wide downsample in a `[UInt32: Int]` dictionary, then created a `UIColor` for every distinct colour in the image, desaturated it, read its components and sorted all of them — tens of thousands of colours in a photo, although the selection loop usually stops after a few dozen. Pixels are now counted with a two-pass radix sort, and the candidates come out of a max-heap in the original order (most frequent first, ties broken by colour value); each one becomes a `UIColor` only when the loop reaches it, and the loop still stops as soon as it has all four colours. Both the callback and the `async` variant get this.
+- **`SwiftyLabel` keeps one `NSTextStorage` for its whole lifetime.** 2.x copied the attributed text, filled in the default attributes, built a new text storage and re-attached the layout manager on every `draw` and every `sizeThatFits` — and `intrinsicContentSize` goes through `sizeThatFits`, which Auto Layout calls several times per pass — so glyphs were generated from scratch every time. The storage is now rebuilt only after the text or one of its attributes changes; a new container size only invalidates layout.
+- **`SwiftyToast` no longer animates while it holds.** The 2.5-second hold between fading in and fading out used to be an animation of `alpha` from 1 to 1.0001: nothing visible changed, but Core Animation composited the layer on every frame for the whole hold and the render loop could never go idle. The hold is now a `Task.sleep`. Two UI tests that wait for the app to become idle got faster as a side effect.
+- **`Promise.value()` and `UIImage.colors()` are explicitly `nonisolated(nonsending)`.** They register on the caller's actor instead of hopping to the global concurrent executor first. Writing it on the declaration keeps the behaviour the same whatever build settings the library is compiled with.
+- Smaller allocations removed: `UIColor.hex(_:)` parses the string's UTF-8 bytes directly instead of building intermediate strings, with exactly the same accept and reject rules; `SwiftyGlobal.keyWindow` walks the connected scenes without building an intermediate array; `SwiftyGlobal.modelName` decodes the `uname` bytes instead of reflecting over a 256-element tuple with `Mirror`.
+
+### Tooling
+
+- `Package.swift`: `swift-tools-version: 6.2`, iOS 18, an explicit Swift 6 language mode, and five upcoming features turned on for both targets — `NonisolatedNonsendingByDefault`, `InferIsolatedConformances` and `MemberImportVisibility` (Xcode 27's defaults for new targets) plus `ExistentialAny` and `InternalImportsByDefault`. All five are Swift 7 language mode defaults. As a result, sources that expose UIKit or Foundation types publicly now say `public import`.
+- `SwiftyUI.podspec` turns on the same five features through `pod_target_xcconfig`, and the Xcode project's framework target does the same, so CocoaPods, Swift Package Manager and the example project compile the same source the same way.
+- The Xcode project takes Xcode 27's recommended settings: deployment target 18.0 on every target (which also silences five XCTest linker warnings), the template's warning and language-standard settings, and `SWIFT_COMPILATION_MODE = wholemodule` for Release in place of the pre-Xcode 10 `-Owholemodule` optimization level. The UI test class is main-actor isolated, which clears 121 isolation warnings from Xcode 27's newly annotated XCUIAutomation.
+- CI: `actions/checkout` v5 → v7, and the Xcode floor check moves from 16 to 26. Jobs stay on `macos-latest`, which ships Xcode 26.6; Xcode 27 is only available under GitHub's `xcode-27` preview label.
+- `Scripts/check-readme.sh` type-checks the README examples against iOS 18.
+
 ## 2.1.0
 
 A cancellation release for `SwiftyPromise`. Before this version, `Sources/SwiftyPromise.swift` never once looked at `isCancelled`, so a chain had no idea the operations backing it had been cancelled — while `SwiftyThreadPool` cancels every operation in its queue the moment the app takes a memory warning. Cancellation now produces an error the caller can see, instead of a silently wrong result or a permanent hang.

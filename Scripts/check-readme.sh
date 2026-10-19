@@ -151,8 +151,10 @@ echo "README 的 Swift 代码块全部编译通过"
 # 而不是让检查悄悄放过。
 EXTERNAL_ALLOWLIST="
 AnyObject
+Atomic
 Date
 MainActor
+Mutex
 NSObject
 Operation
 OperationQueue
@@ -171,6 +173,10 @@ EXTERNAL_ALLOWLIST="$EXTERNAL_ALLOWLIST
 T
 Package
 Podfile
+"
+# 已删除的类型,只在 README 的迁移说明里出现。
+EXTERNAL_ALLOWLIST="$EXTERNAL_ALLOWLIST
+ClosureVoidWrapper
 "
 
 PUBLIC_TYPES="$(

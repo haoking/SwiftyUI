@@ -70,15 +70,6 @@ public enum SwiftyGlobal {
   }()
 }
 
-@available(*, deprecated, message: "全库从未使用过这个类型,将在下个大版本移除。")
-public final class ClosureVoidWrapper {
-  public var closure: (() -> Void)?
-
-  public init(_ closure: (() -> Void)?) {
-    self.closure = closure
-  }
-}
-
 public final class ClosureWrapper<T> {
   public var closure: ((_ obj: T?) -> Void)?
 

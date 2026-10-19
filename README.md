@@ -1,6 +1,6 @@
 # SwiftyUI [![Awesome](https://cdn.rawgit.com/sindresorhus/awesome/d7305f38d29fed78fa85652e3a63e154dd8e8829/media/badge.svg)](https://github.com/sindresorhus/awesome)
 
-![Build Status](https://github.com/haoking/SwiftyUI/actions/workflows/ci.yml/badge.svg) ![CocoaPods Compatible](https://img.shields.io/cocoapods/v/SwiftyUI.svg) ![Platform](https://img.shields.io/cocoapods/p/SwiftyUI.svg?style=flat) ![Swift 6.0](https://img.shields.io/badge/Swift-6.0-orange.svg)
+![Build Status](https://github.com/haoking/SwiftyUI/actions/workflows/ci.yml/badge.svg) ![CocoaPods Compatible](https://img.shields.io/cocoapods/v/SwiftyUI.svg) ![Platform](https://img.shields.io/cocoapods/p/SwiftyUI.svg?style=flat) ![Swift 6.2](https://img.shields.io/badge/Swift-6.2-orange.svg)
 
 High performance and lightweight UIView, UIImage, UIImageView, UIlabel, UIButton and more.
 
@@ -18,6 +18,7 @@ High performance and lightweight UIView, UIImage, UIImageView, UIlabel, UIButton
 - [x] SwiftyAlert contains SuccessAlert, ErrorAlert, WarningAlert, InfoAlert, EditAlert and their special styles.
 - [x] lightweight, almost one class for each UI
 - [x] UI mutations are confined to the main thread at compile time, enforced via `@MainActor`
+- [x] Thread safety is checked by the compiler: shared state sits behind `Mutex` and `Atomic` from the Synchronization module, and nothing in the library is `@unchecked Sendable`
 - [x] Block-Package to more easy to use
 - [x] Easy and simple to use, all APIs are same to system APIs
 - [x] SwiftyThreadPool auto manage threads depends on active CPUs
@@ -27,9 +28,9 @@ High performance and lightweight UIView, UIImage, UIImageView, UIlabel, UIButton
 
 ## Requirements
 
-- iOS 15.0+
-- Xcode 16.0+
-- Swift 6.0
+- iOS 18.0+
+- Xcode 26.0+
+- Swift 6.2
 
 ## Communication
 
@@ -43,7 +44,7 @@ High performance and lightweight UIView, UIImage, UIImageView, UIlabel, UIButton
 
 [Swift Package Manager](https://swift.org/package-manager/) is a tool for managing the distribution of Swift code. It’s integrated with the Swift build system to automate the process of downloading, compiling, and linking dependencies.
 
-> Xcode 16.0+ is required.
+> Xcode 26.0+ is required: `Package.swift` declares `swift-tools-version: 6.2`.
 
 To integrate SwiftyUI into your Xcode project using Swift Package Manager
 
@@ -58,7 +59,7 @@ Or, add it to the dependencies value of your `Package.swift`:
 <!-- readme-check: skip Package.swift 清单里的片段,不是能放进函数体的语句 -->
 ```swift
 dependencies: [
-    .package(url: "https://github.com/haoking/SwiftyUI.git", .upToNextMajor(from: "2.1.0"))
+    .package(url: "https://github.com/haoking/SwiftyUI.git", .upToNextMajor(from: "3.0.0"))
 ]
 ```
 
@@ -72,11 +73,13 @@ $ gem install cocoapods
 
 > CocoaPods 1.4.0+ is required (the podspec declares `swift_version`, which older CocoaPods versions ignore).
 
+> CocoaPods trunk stops accepting new versions on December 2, 2026. Versions published before then keep installing as usual; for anything later, point the Podfile at a git tag instead, e.g. `pod 'SwiftyUI', :git => 'https://github.com/haoking/SwiftyUI.git', :tag => '3.0.0'`.
+
 To integrate SwiftyUI into your Xcode project using CocoaPods, specify it in your `Podfile`:
 
 ```ruby
 source 'https://github.com/CocoaPods/Specs.git'
-platform :ios, '15.0'
+platform :ios, '18.0'
 use_frameworks!
 
 target '<Your Target Name>' do
@@ -89,6 +92,20 @@ Then, run the following command:
 ```bash
 $ pod install
 ```
+
+---
+
+## Migration from 2.x to 3.0
+
+3.0.0 is a breaking upgrade for two reasons: the minimum deployment target rises from iOS 15.0 to iOS 18.0, and the package needs a Swift 6.2 compiler (Xcode 26.0 or later). It also removes the three deprecated APIs that 2.0 said would go in the next major version. The performance work in this release changes no observable result — [CHANGELOG.md](CHANGELOG.md) describes how each rewrite is checked against the 2.1.0 algorithm it replaces.
+
+| Change | Migration |
+| --- | --- |
+| Minimum deployment target is now iOS 18.0 (was 15.0) | Raise your app's deployment target. The library now uses `Mutex` and `Atomic` from the Synchronization module, which first shipped in iOS 18 |
+| A Swift 6.2 compiler (Xcode 26.0+) is required | `Package.swift` declares `swift-tools-version: 6.2`, so an older Xcode refuses to resolve the package. CocoaPods has no such check, so an older compiler stops at a single `#error` that names the requirement |
+| `ImageCachePool.defalut` and `SwiftyThreadPool.defalut` have been removed | Use `.default`. Both had been deprecated, with a rename fix-it, since 2.0 |
+| `ClosureVoidWrapper` has been removed | The library never used it. Use `ClosureWrapper` |
+| `SwiftyAppearance`'s initializer no longer takes `kWindowHeight`, `kTextHeight` or `dynamicAnimatorActive` | Delete those arguments. None of them has had any effect since 2.0 |
 
 ---
 
@@ -195,6 +212,8 @@ myImage?.colors({ (background, primary, secondary, detail) in
 })
 ```
 
+> The analysis downsamples the image to 250 pixels wide, counts colours with a radix sort, and turns colours into `UIColor` only as it considers them, most frequent first, stopping as soon as it has all four.
+
 > The callback is **not** invoked if the analysis fails or is cancelled — and cancellation is not exotic: the analysis runs on `SwiftyThreadPool`, which cancels everything in its queue when the app takes a memory warning. There is no signal of any kind in that case, so a spinner you started before the call will spin forever. This has been true since 2.0; use the `async` variant below when you want failure and cancellation reported rather than swallowed.
 
 The `async` variant runs the same analysis and returns the same four colours, but throws instead of going quiet:
@@ -266,7 +285,7 @@ let circularImage = myImage?.roundedIntoCircle()
 
 The `ImageCachePool` in SwiftyUI fills the role of that additional caching layer. It is an in-memory image cache used to store images up to a given memory capacity. When the memory capacity is reached, entries are purged least-recently-used first until the preferred memory usage after purge is met.
 
-Recency is tracked with a monotonically increasing access counter (`lastAccessSequence`), bumped on every `add` and every successful `image(withIdentifier:)`. 1.x used a `Date` stamp, which ties on any two accesses that land inside the same clock granularity — likely, given that cache hits are far shorter than a clock tick — leaving the purge order effectively arbitrary among the tied entries. A counter cannot tie.
+Recency is the order of a linked list: every `add` and every successful `image(withIdentifier:)` moves that entry to the newest end, and purging removes entries from the oldest end, so a hit or an add costs O(1), plus O(1) for each entry a purge removes. 2.x sorted every entry by an access counter each time the cache went over capacity; 1.x used a `Date` stamp, which ties on any two accesses that land inside the same clock granularity and left the purge order arbitrary among the tied entries. List order cannot tie.
 
 ```swift
 let imageCachePool : ImageCachePool = .default
@@ -331,6 +350,8 @@ myImageView.transition(myTransition, with: UIImage.load("aImage")!)
 ### SwiftyLabel
 
 SwiftyLabel is a better performance than UILabel and can be used like a standard UI component. Also, Easier to use than UILabel. Since UIView is inherited instead of UILabel, there is little wasteful processing. It uses the function of TextKit to draw characters.
+
+It keeps one text storage for its whole lifetime and rebuilds it only when the text or one of its text attributes changes, so the repeated measuring that Auto Layout does, and every redraw, reuse glyphs that were already generated.
 
 ```swift
 let myLable : SwiftyLabel = SwiftyLabel("Label", .white, .blue).addTo(view)
@@ -483,7 +504,7 @@ Promise<Void>.firstly(with: nil, on: .background) {
 }.start()
 ```
 
-`value()` is an `async`/`await` bridge: it's another terminator, used in place of `catch()`/`start()` when you want to consume the chain's result with `await` instead of a callback. It suspends until the chain finishes and returns its final value, or throws if the chain errored. If a value was never produced (for example a `Promise<Void>` chain, or one that never called `update(...)`), it returns `nil` rather than throwing.
+`value()` is an `async`/`await` bridge: it's another terminator, used in place of `catch()`/`start()` when you want to consume the chain's result with `await` instead of a callback. It is `nonisolated(nonsending)`, so it registers on whatever actor you call it from rather than hopping to the global executor first. It suspends until the chain finishes and returns its final value, or throws if the chain errored. If a value was never produced (for example a `Promise<Void>` chain, or one that never called `update(...)`), it returns `nil` rather than throwing.
 
 Terminating twice is harmless here: calling `value()` on a chain that another terminator has already settled returns that chain's final value immediately rather than suspending — and if the chain settled by _erroring_, it rethrows that error. (Before 2.1 the error was not kept, so this case returned the last value instead and the failure was invisible.) Terminating more than once is safe in general — `start()`, `catch(_:)` and `value()` share a single one-way latch, so a second terminator never re-drives a chain that is already running or done. Appending is the opposite: a `then` or `always` added after a chain has settled can never run, and 2.1 traps on it in debug builds.
 
