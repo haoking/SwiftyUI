@@ -70,7 +70,7 @@ final class ImageCachePoolTests: XCTestCase {
     let perImageBytes: UInt64 = 8 * 8 * 4  // 256
 
     // 取出局部引用后再进并发块:XCTestCase 自身不是 Sendable,捕获 self
-    // 会被严格并发检查拒绝;ImageCachePool 是 @unchecked Sendable,可直接捕获。
+    // 会被严格并发检查拒绝;ImageCachePool 是 Sendable,可直接捕获。
     let cache = self.cache!
     DispatchQueue.concurrentPerform(iterations: 200) { index in
       let key = "concurrent-\(index % 20)"

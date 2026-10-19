@@ -1,3 +1,4 @@
+import Synchronization
 import UIKit
 
 /// 测试公用工具。所有测试图片都在内存中确定性生成,不依赖任何资源文件。
@@ -121,16 +122,12 @@ func withTestTimeout<T: Sendable>(
 
 /// 只让第一个调用者胜出。与 Sources/SwiftyPromise.swift 里的 ResumeGuard 同型
 /// ——那个是 private 的,跨模块用不了。
-private final class TestOnce: @unchecked Sendable {
-  private let lock = NSLock()
-  private var claimed = false
+private final class TestOnce: Sendable {
+  private let claimed = Atomic<Bool>(false)
 
   func claim() -> Bool {
-    lock.lock()
-    defer { lock.unlock() }
-    guard !claimed else { return false }
-    claimed = true
-    return true
+    claimed.compareExchange(expected: false, desired: true, ordering: .acquiringAndReleasing)
+      .exchanged
   }
 }
 
@@ -140,24 +137,15 @@ private final class TestOnce: @unchecked Sendable {
 /// 都是 @Sendable 的,直接捕获并改写一个局部 `var` 是真实的数据竞争
 /// ——回调线程写、测试线程在 wait 之后读——严格并发检查会拒绝。
 /// 加锁后语义不变,断言仍然成立。
-final class Box<Value: Sendable>: @unchecked Sendable {
-  private let lock = NSLock()
-  private var storage: Value
+final class Box<Value: Sendable>: Sendable {
+  private let storage: Mutex<Value>
 
   init(_ initial: Value) {
-    storage = initial
+    storage = Mutex(initial)
   }
 
   var value: Value {
-    get {
-      lock.lock()
-      defer { lock.unlock() }
-      return storage
-    }
-    set {
-      lock.lock()
-      defer { lock.unlock() }
-      storage = newValue
-    }
+    get { storage.withLock { $0 } }
+    set { storage.withLock { $0 = newValue } }
   }
 }

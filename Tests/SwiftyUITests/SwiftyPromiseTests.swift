@@ -1,3 +1,4 @@
+import Synchronization
 import XCTest
 
 @testable import SwiftyUI
@@ -7,20 +8,15 @@ private struct TestError: Error {}
 final class SwiftyPromiseTests: XCTestCase {
 
   /// 记录执行顺序的线程安全收集器
-  private final class Recorder: @unchecked Sendable {
-    private let lock = NSLock()
-    private var items: [String] = []
+  private final class Recorder: Sendable {
+    private let items = Mutex<[String]>([])
 
     func record(_ item: String) {
-      lock.lock()
-      defer { lock.unlock() }
-      items.append(item)
+      items.withLock { $0.append(item) }
     }
 
     var snapshot: [String] {
-      lock.lock()
-      defer { lock.unlock() }
-      return items
+      items.withLock { $0 }
     }
   }
 
