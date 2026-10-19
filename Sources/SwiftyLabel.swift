@@ -6,7 +6,7 @@
 //  Copyright © 2017 Haochen Wang. All rights reserved.
 //
 
-import UIKit
+public import UIKit
 
 /// 用 TextKit 自绘文本的轻量标签。
 ///

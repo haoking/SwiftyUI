@@ -124,7 +124,7 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
   private var tasks: [PromiseTask] = []
   private var alwaysTasks: [PromiseTask] = []
   /// 调用方经 `catch(_:)` 登记的错误处理器。替换语义,由调用方独占。
-  private var errorBlock: (@Sendable (Error) -> Void)?
+  private var errorBlock: (@Sendable (any Error) -> Void)?
   /// 库内部自己的错误处理器,与 `errorBlock` **完全分开的一个槽位**。
   ///
   /// 目前唯一的使用者是 `value()`:它需要在出错时恢复自己的 continuation。
@@ -137,7 +137,7 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
   ///   value() 的 continuation 仍然会被恢复(否则那个 await 永远挂起)。
   ///
   /// 因此 `catch(_:)` 的公开语义(替换)一个字都不用改。
-  private var internalErrorHandler: (@Sendable (Error) -> Void)?
+  private var internalErrorHandler: (@Sendable (any Error) -> Void)?
   /// 终结这条链的错误;nil 表示至今没有出过错。
   ///
   /// 它同时充当原先那个独立的 `isError` 标志(fire() 据此丢弃剩余任务)——
@@ -149,7 +149,7 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
   ///
   /// 首次写入即定:后来的 markError 不顶替它 —— 真正终结链条、并被两个槽位的
   /// 处理器实际收到的是第一个错误。
-  private var error: Error?
+  private var error: (any Error)?
   private var isStarted: Bool = false
   private var isFinished: Bool = false
   private var value: T?
@@ -160,22 +160,23 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
     return stateQueue.sync(execute: body)
   }
 
-  private func markError(_ error: Error) {
+  private func markError(_ error: any Error) {
     // errorBlock 是用户代码,可能回头访问本 Promise,故取出后在临界区外调用。
     // 也正因为在临界区外,它跑在"出错的那个 operation 所在的线程"上
     // (.background 时是 SwiftyThreadPool,.main 时是 OperationQueue.main),
     // 所以 errorBlock 必须是 @Sendable 的 —— 详见 catch(_:) 的说明。
-    let handlers: (user: (@Sendable (Error) -> Void)?, internal: (@Sendable (Error) -> Void)?) =
-      withState {
-        // 存错误与读槽位在**同一个**临界区内完成,这是 registerValueWaiter
-        // 那边的判据能成立的前提:stateQueue 是串行的,因此对任何一次 value()
-        // 的注册来说,二者只有两种相对顺序 —— 要么注册在前(这里读到的槽位里
-        // 就有它的处理器),要么这里在前(注册那边读到 self.error 非 nil,
-        // 直接以这个错误恢复)。中间没有第三种可能,也就没有"错误谁都没收到"
-        // 的窗口。
-        if self.error == nil { self.error = error }
-        return (self.errorBlock, self.internalErrorHandler)
-      }
+    let handlers:
+      (user: (@Sendable (any Error) -> Void)?, internal: (@Sendable (any Error) -> Void)?) =
+        withState {
+          // 存错误与读槽位在**同一个**临界区内完成,这是 registerValueWaiter
+          // 那边的判据能成立的前提:stateQueue 是串行的,因此对任何一次 value()
+          // 的注册来说,二者只有两种相对顺序 —— 要么注册在前(这里读到的槽位里
+          // 就有它的处理器),要么这里在前(注册那边读到 self.error 非 nil,
+          // 直接以这个错误恢复)。中间没有第三种可能,也就没有"错误谁都没收到"
+          // 的窗口。
+          if self.error == nil { self.error = error }
+          return (self.errorBlock, self.internalErrorHandler)
+        }
     // 顺序有意义:先调用方的,再库内部的。内部那个(value() 的)会恢复
     // continuation,一旦恢复,await 处的代码就可能立刻继续往下跑;先跑调用方的
     // 处理器,才能保证 `await value()` 返回时它已经执行完毕,而不是留下一个
@@ -387,7 +388,7 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
   ///   它只写 `errorBlock` 这一个槽位,库内部的处理器在
   ///   `internalErrorHandler` 里,两者互不影响;因此 `catch(_:)` 与 `value()`
   ///   无论谁先谁后,都不会破坏对方(见 internalErrorHandler 的说明)。
-  public func `catch`(_ errorBlock: (@Sendable (Error) -> Void)? = nil) {
+  public func `catch`(_ errorBlock: (@Sendable (any Error) -> Void)? = nil) {
     withState { self.errorBlock = errorBlock }
     beginIfNeeded()
   }
@@ -399,7 +400,7 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
     /// 链条已经终结且从未出错:以当前值立即恢复。
     case settled
     /// 链条已经出错(可能尚未走完终结):以这个错误立即恢复。
-    case failed(Error)
+    case failed(any Error)
   }
 
   /// value() 的登记:**四**件事必须在同一个临界区内完成 —— 判"是否已出错"、
@@ -425,7 +426,7 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
   /// 现在它会被重新抛出。
   private func registerValueWaiter(
     _ alwaysTask: PromiseTask,
-    onError handler: @escaping @Sendable (Error) -> Void
+    onError handler: @escaping @Sendable (any Error) -> Void
   ) -> ValueRegistration {
     withState {
       // 先判错误,再判终结:出过错就一定会走到终结,反过来不成立,而调用方
@@ -510,7 +511,11 @@ public final class Promise<T: Sendable>: @unchecked Sendable {
   ///      要命:它把 queue 置 nil,而 `restart()` 是 `currentQueue?.isSuspended
   ///      = false`,对 nil 是空操作 —— 这条路径**再也无法恢复**。
   ///      (第 2、3 条的行为修复不在 2.1 范围内,见 issue #6。)
-  public func value() async throws -> T? {
+  /// - Note: 3.0 起显式标为 `nonisolated(nonsending)`:登记在调用方所在的执行器上
+  ///   完成(从主 actor 调用就在主线程登记),不再先跳到全局并发执行器再跳回来。
+  ///   写在声明上而不是只靠 NonisolatedNonsendingByDefault,这样无论使用方用什么
+  ///   构建设置编译本库,行为都相同。
+  public nonisolated(nonsending) func value() async throws -> T? {
     return try await withCheckedThrowingContinuation { continuation in
       // 用一个 box 保证 continuation 只被恢复一次:链条正常结束与出错
       // 互斥,但两条路径都会走到这里——出错时 markError 先调用下面的

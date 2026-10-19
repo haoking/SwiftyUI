@@ -100,7 +100,7 @@ END {
 
 # ── 编译 ────────────────────────────────────────────────────────────────
 # 只做类型检查,不生成产物 —— 要验的是"这段代码能不能编译",不是能不能运行。
-# 目标三元组与语言模式必须与 Package.swift 一致(iOS 15 / Swift 6),
+# 目标三元组与语言模式必须与 Package.swift 一致(iOS 18 / Swift 6),
 # 否则检查过了、使用者那边照样编译不过。
 #
 # -suppress-warnings:生成文件里的 "unused variable" 是**包装手法的产物**
@@ -113,7 +113,7 @@ set +e
 xcrun swiftc \
   -typecheck \
   -swift-version 6 \
-  -target arm64-apple-ios15.0-simulator \
+  -target arm64-apple-ios18.0-simulator \
   -sdk "$SDK" \
   -I "$PRODUCTS" \
   -suppress-warnings \

@@ -6,7 +6,7 @@
 //  Copyright © 2017 Haochen Wang. All rights reserved.
 //
 
-import UIKit
+public import UIKit
 
 /// 文本在视图中的对齐方式。
 public enum TextContentAlignment: Int {

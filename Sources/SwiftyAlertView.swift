@@ -6,7 +6,7 @@
 //  Copyright © 2017 Haochen Wang. All rights reserved.
 //
 
-import UIKit
+public import UIKit
 
 @MainActor
 open class SwiftyAlertButton: UIButton {

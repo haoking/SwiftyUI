@@ -6,7 +6,7 @@
 //  Copyright © 2017 Haochen Wang. All rights reserved.
 //
 
-import UIKit
+public import UIKit
 
 /// 内存图片缓存的接口。
 ///

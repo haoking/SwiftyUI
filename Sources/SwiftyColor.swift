@@ -6,7 +6,7 @@
 //  Copyright © 2017 Haochen Wang. All rights reserved.
 //
 
-import UIKit
+public import UIKit
 
 extension UIColor {
   @inlinable
@@ -195,7 +195,9 @@ extension UIImage {
   /// - Throws: `PromiseError.noValue` —— 链条终结但没有产出值。按当前实现不会抛出:
   ///   await 期间接收者由调用方保活,下面的 weak self 守卫不会失败;没有位图可分析的
   ///   图片也会得到回落色而不是空值。保留它,只为不对 value() 的可选结果强解包。
-  public final func colors() async throws -> (
+  /// - Note: 与 `value()` 一样显式标为 `nonisolated(nonsending)`,在调用方的执行器上
+  ///   运行,不额外跳一次全局并发执行器;上面第 2 条区别因此照旧成立。
+  public final nonisolated(nonsending) func colors() async throws -> (
     background: UIColor, primary: UIColor, secondary: UIColor, detail: UIColor
   ) {
     let promise = Promise<(UIColor, UIColor, UIColor, UIColor)>.firstly { [weak self] (update, _) in
@@ -295,7 +297,8 @@ extension UIImage {
     }
 
     var sortedColors: [CountedColor] = edgeCounts.compactMap { key, count in
-      count >= randomColorsThreshold ? CountedColor(color: color(of: key), count: count, key: key) : nil
+      count >= randomColorsThreshold
+        ? CountedColor(color: color(of: key), count: count, key: key) : nil
     }
 
     sortedColors.sort(by: sortComparator)

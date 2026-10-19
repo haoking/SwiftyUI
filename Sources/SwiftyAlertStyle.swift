@@ -1,4 +1,4 @@
-import UIKit
+public import UIKit
 
 public enum SwiftyAlertViewStyle {
   case success, error, warning, info, edit

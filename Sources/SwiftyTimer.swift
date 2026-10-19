@@ -6,7 +6,7 @@
 //  Copyright © 2017 Haochen Wang. All rights reserved.
 //
 
-import Foundation
+public import Foundation
 
 extension Timer {
   /// 创建一个 `interval` 秒后触发一次的 timer。

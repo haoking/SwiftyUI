@@ -6,7 +6,7 @@
 //  Copyright © 2017 Haochen Wang. All rights reserved.
 //
 
-import UIKit
+public import UIKit
 
 /// 可以把一张图片直接挂到 layer.contents 上的视图。
 ///

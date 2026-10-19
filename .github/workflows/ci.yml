@@ -12,10 +12,15 @@ name: CI
 #     诡异的失败。
 #   - 不固定具体的 /Applications/Xcode_16.app 路径。runner 上实际装了哪些 Xcode、
 #     叫什么名字,只有真跑一次才知道。改为:先打印全部已装 Xcode 版本,再动态选出
-#     版本号最高的一个并校验其 ≥ 16(Swift 6 语言模式的最低要求)。这与 Scripts/test.sh
+#     版本号最高的一个并校验其 ≥ 26(swift-tools-version 6.2 的最低要求)。这与 Scripts/test.sh
 #     动态解析模拟器 UDID 是同一套思路——不硬编码在多个 runner 世代之间不稳定的名字。
 #   - 若这些假设有误,失败会发生在"选择 Xcode"这一步,报错信息里带着上一步打印的
 #     完整版本列表,可直接定位,不会是后面构建步骤里一条无关的编译错误。
+#   - 3.0 起本机开发用 Xcode 27,CI 却仍跑在 macos-latest 上(写这段时是 macOS 26 +
+#     Xcode 26.6)。Xcode 27 只在 `xcode-27` 预览标签上提供:官方说明可能排队,转正后
+#     这个标签也可能下线 —— 下线的标签会让 job 永久排队,正是上一条要避免的。
+#     Package.swift 的 swift-tools-version 定在 6.2,正是为了让 Xcode 26 也能构建;
+#     最新工具链由本机的 Xcode 27 验证。
 # ―――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――
 
 on:
@@ -33,7 +38,7 @@ jobs:
     # 20 分钟对上述总和有数倍余量,同时远低于 GitHub 6 小时的默认上限。
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: 列出 runner 上可用的 Xcode
         # 不管后面选择 Xcode 是否成功,先把实情打进日志,方便和假设不符时排查。
@@ -84,9 +89,9 @@ jobs:
             exit 1
           fi
           major="${best_version%%.*}"
-          if [ "$major" -lt 16 ]; then
-            echo "错误:本 runner 上最新的是 Xcode $best_version,低于 Swift 6 语言模式所需的 Xcode 16。" >&2
-            echo "本库 Package.swift 的 swift-tools-version 为 6.0,必须在支持 Swift 6 的 Xcode 上构建。" >&2
+          if [ "$major" -lt 26 ]; then
+            echo "错误:本 runner 上最新的是 Xcode $best_version,低于 swift-tools-version 6.2 所需的 Xcode 26。" >&2
+            echo "本库 Package.swift 的 swift-tools-version 为 6.2,必须在带 Swift 6.2 或更新编译器的 Xcode 上构建。" >&2
             exit 1
           fi
           echo "选用 $best_path (Xcode $best_version)"
@@ -148,7 +153,7 @@ jobs:
     # 给同样有数倍余量的上限。
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: 列出 runner 上可用的 Xcode
         run: |
@@ -196,8 +201,8 @@ jobs:
             exit 1
           fi
           major="${best_version%%.*}"
-          if [ "$major" -lt 16 ]; then
-            echo "错误:本 runner 上最新的是 Xcode $best_version,低于 Swift 6 语言模式所需的 Xcode 16。" >&2
+          if [ "$major" -lt 26 ]; then
+            echo "错误:本 runner 上最新的是 Xcode $best_version,低于 Swift 6.2 编译器所需的 Xcode 26。" >&2
             exit 1
           fi
           echo "选用 $best_path (Xcode $best_version)"
@@ -207,5 +212,5 @@ jobs:
       - name: pod lib lint
         # --allow-warnings:podspec 校验目前只剩非阻断性告警(源码本身的构建是
         # 0 warning,见上面的"构建库"步骤)。这个 job 预期通过 —— 它一旦变红,
-        # 说明 podspec 与源码的实际要求(iOS 15+、Swift 6)又脱节了。
+        # 说明 podspec 与源码的实际要求(iOS 18+、Swift 6.2 编译器)又脱节了。
         run: pod lib lint --allow-warnings

@@ -6,7 +6,14 @@
 //  Copyright © 2017 Haochen Wang. All rights reserved.
 //
 
-import UIKit
+public import UIKit
+
+// SPM 使用者会先被 Package.swift 的 swift-tools-version 6.2 挡住,并看到一条清楚的提示;
+// CocoaPods 没有 manifest 这一关,旧编译器只会在 `nonisolated(nonsending)` 之类的新语法上
+// 报出一串难懂的语法错误。这里给他们同样清楚的一句话。
+#if !compiler(>=6.2)
+  #error("SwiftyUI 3.0 需要 Swift 6.2 编译器(Xcode 26.0 或更新)")
+#endif
 
 /// 全局 UI 度量。
 ///

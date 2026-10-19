@@ -6,7 +6,7 @@
 //  Copyright © 2017 Haochen Wang. All rights reserved.
 //
 
-import UIKit
+public import UIKit
 
 /// 轻量视图基类:自动维护 isOpaque,减少离屏混合。
 @MainActor

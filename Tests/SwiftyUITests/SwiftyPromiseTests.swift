@@ -664,7 +664,7 @@ final class SwiftyPromiseTests: XCTestCase {
     pool.stop()
 
     let secondTaskRan = Box(false)
-    let received = Box<Error?>(nil)
+    let received = Box<(any Error)?>(nil)
     let settled = XCTestExpectation(description: "chain settles")
 
     let promise = Promise<Int>.firstly(pool: pool, with: "first", on: .background) { (update, _) in

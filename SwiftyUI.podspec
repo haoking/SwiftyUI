@@ -16,7 +16,7 @@ Pod::Spec.new do |s|
   #
 
   s.name         = "SwiftyUI"
-  s.version      = "2.1.0"
+  s.version      = "3.0.0"
   s.summary      = "High performance and lightweight UI."
 
   # This description is used to generate tags and improve search results.
@@ -68,14 +68,31 @@ Pod::Spec.new do |s|
   # s.platform     = :ios, "5.0"
 
   #  When using multiple platforms
-  s.ios.deployment_target = "15.0"
+  #  3.0.0 raised the floor from 15.0 to 18.0: the source uses Mutex and Atomic
+  #  from the Synchronization module, which first shipped in iOS 18.
+  s.ios.deployment_target = "18.0"
   # s.osx.deployment_target = "10.7"
   # s.watchos.deployment_target = "2.0"
   # s.tvos.deployment_target = "9.0"
 
-  #  2.0.0 is the first Swift 6 language mode release; the source relies on
-  #  @MainActor isolation and structured concurrency introduced in Swift 6.
+  #  This is the Swift *language mode*, not the compiler version: Swift 6.4 still
+  #  only has language modes up to 6. The compiler floor is Swift 6.2 (Xcode 26.0),
+  #  which CocoaPods has no attribute for; Sources/SwiftyGlobal.swift turns an
+  #  older compiler into a single readable #error instead.
   s.swift_version = "6.0"
+
+  #  The same five upcoming features Package.swift enables (Swift 7 defaults; the
+  #  first three are Xcode 27's defaults for new targets). They have to match:
+  #  NonisolatedNonsendingByDefault changes which executor a nonisolated async
+  #  function runs on, so building the pod without it would make the same source
+  #  behave differently from the SwiftPM build.
+  s.pod_target_xcconfig = {
+    'SWIFT_UPCOMING_FEATURE_NONISOLATED_NONSENDING_BY_DEFAULT' => 'YES',
+    'SWIFT_UPCOMING_FEATURE_INFER_ISOLATED_CONFORMANCES' => 'YES',
+    'SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY' => 'YES',
+    'SWIFT_UPCOMING_FEATURE_EXISTENTIAL_ANY' => 'YES',
+    'SWIFT_UPCOMING_FEATURE_INTERNAL_IMPORTS_BY_DEFAULT' => 'YES',
+  }
 
   #  swift_version above is only honoured from CocoaPods 1.4.0 on. Older
   #  versions silently ignore it and build the pod with whatever Swift version

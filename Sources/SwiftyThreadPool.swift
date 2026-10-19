@@ -6,6 +6,7 @@
 //  Copyright © 2017 Haochen Wang. All rights reserved.
 //
 
+public import Foundation
 import UIKit
 
 public final class SwiftyThreadPool: @unchecked Sendable {

@@ -6,7 +6,7 @@
 //  Copyright © 2017 Haochen Wang. All rights reserved.
 //
 
-import UIKit
+public import UIKit
 
 extension UIImage {
   public final class func load(_ data: Data) -> UIImage? {
