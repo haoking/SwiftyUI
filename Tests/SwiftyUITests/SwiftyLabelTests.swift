@@ -145,7 +145,8 @@ final class SwiftyLabelTests: XCTestCase {
 
     let unsized = SwiftyLabel(text)
     XCTAssertEqual(
-      unsized.intrinsicContentSize, unsized.sizeThatFits(CGSize(width: unlimited, height: unlimited)),
+      unsized.intrinsicContentSize,
+      unsized.sizeThatFits(CGSize(width: unlimited, height: unlimited)),
       "尚未布局时应按不限宽量出单行尺寸")
   }
 
@@ -248,5 +249,95 @@ final class SwiftyLabelTests: XCTestCase {
     UIGraphicsImageRenderer(size: label.bounds.size).image { _ in
       label.draw(label.bounds)
     }
+  }
+
+  // MARK: - 常驻文本存储的缓存不能过期
+
+  /// 同一个 label 连续改属性,每一步的尺寸与绘制像素都必须与"用同样属性新建的 label"一致。
+  ///
+  /// 3.0 起 SwiftyLabel 常驻一份 NSTextStorage,属性变了才重建,不再每次绘制、每次量尺寸
+  /// 都从头生成字形。这样做的风险是缓存过期没失效:改了字体却还按旧字体排版,改了行数
+  /// 却还用旧的布局。新建的 label 没有任何缓存,是天然的参照。每一步都先让被测 label
+  /// 量一遍、画一遍(把布局缓存起来),再改下一个属性。
+  ///
+  /// 判别力:去掉任一属性的"标记过期",或去掉容器属性变化后的布局失效,本测试变红。
+  func testCachedLayoutMatchesFreshLabelAfterMutations() {
+    let steps: [(String, (SwiftyLabel) -> Void)] = [
+      ("长文本", { $0.text = String(repeating: "SwiftyLabel 缓存对拍 wrap me ", count: 6) }),
+      ("单行", { $0.numberOfLines = 1 }),
+      ("padding", { $0.padding = 8 }),
+      ("按词换行", { $0.lineBreakMode = .byWordWrapping }),
+      ("不限行数", { $0.numberOfLines = 0 }),
+      ("字体", { $0.font = .systemFont(ofSize: 20) }),
+      (
+        "段落样式",
+        {
+          let style = NSMutableParagraphStyle()
+          style.lineSpacing = 6
+          $0.paragraphStyle = style
+        }
+      ),
+      ("颜色", { $0.textColor = .red }),
+      (
+        "阴影",
+        {
+          let shadow = NSShadow()
+          shadow.shadowOffset = CGSize(width: 1, height: 1)
+          shadow.shadowBlurRadius = 2
+          $0.shadow = shadow
+        }
+      ),
+      (
+        "显式属性串",
+        {
+          $0.attributedText = NSAttributedString(
+            string: "显式颜色的属性串,也要换行 wrap wrap wrap wrap",
+            attributes: [.foregroundColor: UIColor.blue])
+        }
+      ),
+      ("空串", { $0.text = "" }),
+      ("短文本", { $0.text = "回来" }),
+      ("nil", { $0.text = nil }),
+    ]
+    let probes = [
+      CGSize(width: 120, height: CGFloat.greatestFiniteMagnitude),
+      CGSize(width: 60, height: CGFloat.greatestFiniteMagnitude),
+      CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude),
+    ]
+    let frame = CGRect(x: 0, y: 0, width: 120, height: 200)
+
+    let label = SwiftyLabel(nil, .black, .white)
+    label.frame = frame
+    for index in steps.indices {
+      let (name, apply) = steps[index]
+      apply(label)
+
+      let fresh = SwiftyLabel(nil, .black, .white)
+      fresh.frame = frame
+      for (_, earlier) in steps[...index] { earlier(fresh) }
+
+      for probe in probes {
+        XCTAssertEqual(
+          label.sizeThatFits(probe), fresh.sizeThatFits(probe), "「\(name)」之后,按 \(probe) 量出的尺寸不一致")
+      }
+      XCTAssertEqual(
+        label.intrinsicContentSize, fresh.intrinsicContentSize,
+        "「\(name)」之后,intrinsicContentSize 不一致"
+      )
+      XCTAssertEqual(Self.render(label), Self.render(fresh), "「\(name)」之后,绘制出的像素不一致")
+    }
+  }
+
+  /// 把 label 按自己的 bounds 画进一张 scale 为 1、白底的位图,返回全部字节。
+  private static func render(_ label: SwiftyLabel) -> [UInt8] {
+    let format = UIGraphicsImageRendererFormat()
+    format.scale = 1
+    format.opaque = true
+    let image = UIGraphicsImageRenderer(size: label.bounds.size, format: format).image { ctx in
+      UIColor.white.setFill()
+      ctx.fill(label.bounds)
+      label.draw(label.bounds)
+    }
+    return pixels(of: image, in: label.bounds)
   }
 }

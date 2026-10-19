@@ -20,6 +20,15 @@ public class SwiftyLabel: UIView, TextEditable {
 
   private let container = NSTextContainer()
   private let layoutManager = NSLayoutManager()
+  /// 常驻的文本存储,init 里挂上 layoutManager 后一直用这一份。
+  ///
+  /// 2.x 每次 draw、每次 sizeThatFits(intrinsicContentSize 也走这里,Auto Layout
+  /// 一轮布局会问好几次)都拷贝一份 attributedText、补齐默认属性、新建 NSTextStorage
+  /// 再挂上 layoutManager,字形每次都从头生成。现在只在影响合并结果的属性变了之后
+  /// 才重建一次;容器尺寸变化只让布局失效,字形照旧复用。
+  private let textStorage = NSTextStorage()
+  /// mergedAttributedText 依赖的属性变过、还没同步进 textStorage。
+  private var textStorageIsStale = true
 
   // MARK: - 存储属性
   //
@@ -40,25 +49,40 @@ public class SwiftyLabel: UIView, TextEditable {
   }
 
   public var font: UIFont = .systemFont(ofSize: UIFont.systemFontSize) {
-    didSet { textLayoutDidChange() }
+    didSet {
+      textStorageIsStale = true
+      textLayoutDidChange()
+    }
   }
 
   /// 2.0 起为非可选。1.x 声明为 UIColor? 但 getter 永不返回 nil,
   /// 且合成属性字符串时对它强解包。
   public var textColor: UIColor = .black {
-    didSet { setNeedsDisplay() }
+    didSet {
+      textStorageIsStale = true
+      setNeedsDisplay()
+    }
   }
 
   public var paragraphStyle: NSParagraphStyle = .default {
-    didSet { textLayoutDidChange() }
+    didSet {
+      textStorageIsStale = true
+      textLayoutDidChange()
+    }
   }
 
   public var shadow: NSShadow? = nil {
-    didSet { setNeedsDisplay() }
+    didSet {
+      textStorageIsStale = true
+      setNeedsDisplay()
+    }
   }
 
   public var attributedText: NSAttributedString? = nil {
-    didSet { textLayoutDidChange() }
+    didSet {
+      textStorageIsStale = true
+      textLayoutDidChange()
+    }
   }
 
   // MARK: - 经由 NSTextContainer 的属性
@@ -68,7 +92,7 @@ public class SwiftyLabel: UIView, TextEditable {
     get { container.maximumNumberOfLines }
     set {
       container.maximumNumberOfLines = newValue
-      textLayoutDidChange()
+      containerDidChange()
     }
   }
 
@@ -77,7 +101,7 @@ public class SwiftyLabel: UIView, TextEditable {
     get { container.lineFragmentPadding }
     set {
       container.lineFragmentPadding = newValue
-      textLayoutDidChange()
+      containerDidChange()
     }
   }
 
@@ -86,13 +110,25 @@ public class SwiftyLabel: UIView, TextEditable {
     get { container.lineBreakMode }
     set {
       container.lineBreakMode = newValue
-      textLayoutDidChange()
+      containerDidChange()
     }
   }
 
   private func textLayoutDidChange() {
     setNeedsDisplay()
     invalidateIntrinsicContentSize()
+  }
+
+  /// 行数、padding、换行方式只存在于文本容器上:改了它们,文本存储不用重建,
+  /// 但 layoutManager 手里那份按旧设置排好的布局必须作废。
+  ///
+  /// 实测 NSTextContainer 的这几个 setter 自己就会让布局失效:去掉下面
+  /// textContainerChangedGeometry 这一行,testCachedLayoutMatchesFreshLabelAfterMutations
+  /// 照样通过。保留它是防御性的 —— 那是 TextKit 的实现行为,文档没有承诺;
+  /// 显式失效的代价只是把已失效的布局再标记一次。
+  private func containerDidChange() {
+    layoutManager.textContainerChangedGeometry(container)
+    textLayoutDidChange()
   }
 
   // MARK: - 无障碍
@@ -137,6 +173,7 @@ public class SwiftyLabel: UIView, TextEditable {
     super.init(frame: .zero)
 
     layoutManager.addTextContainer(container)
+    textStorage.addLayoutManager(layoutManager)
 
     container.maximumNumberOfLines = 0
     container.lineFragmentPadding = 0
@@ -177,11 +214,16 @@ public class SwiftyLabel: UIView, TextEditable {
     return result
   }
 
-  open override func draw(_ rect: CGRect) {
-    guard let attributedText = mergedAttributedText else { return }
+  /// 只在相关属性变过之后,才把合并好的属性串同步进常驻的 textStorage。
+  private func syncTextStorageIfNeeded() {
+    guard textStorageIsStale else { return }
+    textStorageIsStale = false
+    textStorage.setAttributedString(mergedAttributedText ?? NSAttributedString())
+  }
 
-    let storage = NSTextStorage(attributedString: attributedText)
-    storage.addLayoutManager(layoutManager)
+  open override func draw(_ rect: CGRect) {
+    guard attributedText != nil else { return }
+    syncTextStorageIfNeeded()
 
     // 排版与对齐一律按 bounds,不按 rect:rect 是 UIKit 传来的脏矩形,局部重绘
     // (setNeedsDisplay(_:))时它只是 bounds 的一块,拿它当容器会把整段文本重排进去。
@@ -208,10 +250,8 @@ public class SwiftyLabel: UIView, TextEditable {
   }
 
   open override func sizeThatFits(_ size: CGSize) -> CGSize {
-    guard let attributedText = mergedAttributedText else { return .zero }
-
-    let storage = NSTextStorage(attributedString: attributedText)
-    storage.addLayoutManager(layoutManager)
+    guard attributedText != nil else { return .zero }
+    syncTextStorageIfNeeded()
 
     container.size = size
     return layoutManager.usedRect(for: container).integral.size
