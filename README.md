@@ -106,6 +106,7 @@ $ pod install
 | `ImageCachePool.defalut` and `SwiftyThreadPool.defalut` have been removed | Use `.default`. Both had been deprecated, with a rename fix-it, since 2.0 |
 | `ClosureVoidWrapper` has been removed | The library never used it. Use `ClosureWrapper` |
 | `SwiftyAppearance`'s initializer no longer takes `kWindowHeight`, `kTextHeight` or `dynamicAnimatorActive` | Delete those arguments. None of them has had any effect since 2.0 |
+| `SwiftyLabel` copies `attributedText`, `paragraphStyle` and `shadow` when you assign them, as UILabel does | Mutating the object you assigned no longer changes the label; assign it again. 2.x re-read these objects on every draw, so in-place changes used to show up at the next redraw |
 
 ---
 
@@ -212,7 +213,7 @@ myImage?.colors({ (background, primary, secondary, detail) in
 })
 ```
 
-> The analysis downsamples the image to 250 pixels wide, counts colours with a radix sort, and turns colours into `UIColor` only as it considers them, most frequent first, stopping as soon as it has all four.
+> The analysis downsamples the image to 250 pixels wide and counts its colours in a single pass — runs of identical neighbouring pixels are added up at once, so flat artwork costs only a few table lookups per row. It then turns colours into `UIColor` only as it considers them, most frequent first, and stops as soon as it has all four.
 
 > The callback is **not** invoked if the analysis fails or is cancelled — and cancellation is not exotic: the analysis runs on `SwiftyThreadPool`, which cancels everything in its queue when the app takes a memory warning. There is no signal of any kind in that case, so a spinner you started before the call will spin forever. This has been true since 2.0; use the `async` variant below when you want failure and cancellation reported rather than swallowed.
 
@@ -351,7 +352,7 @@ myImageView.transition(myTransition, with: UIImage.load("aImage")!)
 
 SwiftyLabel is a better performance than UILabel and can be used like a standard UI component. Also, Easier to use than UILabel. Since UIView is inherited instead of UILabel, there is little wasteful processing. It uses the function of TextKit to draw characters.
 
-It keeps one text storage for its whole lifetime and rebuilds it only when the text or one of its text attributes changes, so the repeated measuring that Auto Layout does, and every redraw, reuse glyphs that were already generated.
+It keeps one text storage for its whole lifetime and rebuilds it only when the text or one of its text attributes changes, so the repeated measuring that Auto Layout does, and every redraw, reuse glyphs that were already generated. Like UILabel, it copies `attributedText`, `paragraphStyle` and `shadow` when you assign them: to change one, assign it again.
 
 ```swift
 let myLable : SwiftyLabel = SwiftyLabel("Label", .white, .blue).addTo(view)

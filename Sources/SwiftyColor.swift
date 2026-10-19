@@ -267,23 +267,32 @@ extension UIImage {
     context.draw(cgImage, in: CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height)))
     let pixels = raw.assumingMemoryBound(to: UInt8.self)
 
-    // 像素打包成 0xRRGGBB。像素格式是 ARGB(premultipliedFirst),字节 1…3 是 R、G、B。
-    // 全图的键与背景采样带 x∈[5,10] 的键各收一份,再分别排序计数(见 PixelKeyCounter)。
-    var imageKeys = [UInt32](repeating: 0, count: width * height)
-    var edgeKeys: [UInt32] = []
-    edgeKeys.reserveCapacity(6 * height)
-    imageKeys.withUnsafeMutableBufferPointer { keys in
-      for y in 0..<height {
-        let row = pixels + y * bytesPerRow
-        for x in 0..<width {
-          let pixel = row + x * 4
-          let key = UInt32(pixel[1]) << 16 | UInt32(pixel[2]) << 8 | UInt32(pixel[3])
-          keys[y * width + x] = key
-          if x >= 5 && x <= 10 {
-            edgeKeys.append(key)
-          }
+    // 像素打包成 0xRRGGBB 计数。像素格式是 ARGB(premultipliedFirst),字节 1…3 是 R、G、B。
+    // 一次扫描同时数出全图与背景采样带 x∈[5,10] 的颜色次数(见 PixelKeyCounts)。
+    guard var imageCounts = PixelKeyCounts(pixelCount: width * height),
+      var edgeCounts = PixelKeyCounts(pixelCount: 6 * height)
+    else { return noColors }
+    for y in 0..<height {
+      let row = pixels + y * bytesPerRow
+      // 同一行里相邻像素常常同色(平涂的背景、插画、图标、文字):连续相同的键先攒成
+      // 一段再计数,平涂的图每行只需要查几次表。
+      var runKey = UInt32(row[1]) << 16 | UInt32(row[2]) << 8 | UInt32(row[3])
+      var runLength = 0
+      for x in 0..<width {
+        let pixel = row + x * 4
+        let key = UInt32(pixel[1]) << 16 | UInt32(pixel[2]) << 8 | UInt32(pixel[3])
+        if x >= 5 && x <= 10 {
+          edgeCounts.add(key, count: 1)
+        }
+        if key == runKey {
+          runLength += 1
+        } else {
+          imageCounts.add(runKey, count: runLength)
+          runKey = key
+          runLength = 1
         }
       }
+      imageCounts.add(runKey, count: runLength)
     }
     func color(of key: UInt32) -> UIColor {
       .load(CGFloat((key >> 16) & 0xFF), CGFloat((key >> 8) & 0xFF), CGFloat(key & 0xFF))
@@ -294,7 +303,7 @@ extension UIImage {
     //                 因此这里必须是降序,取 .first 得到最常见的颜色。
     // 次数相同时按打包值排:字典的遍历顺序逐进程随机,不加这一条结果就不确定。
     // 边缘色只有 6 列,直接排序;全图的候选色交给下面的 PixelColorRanking。
-    let edgeColors = PixelKeyCounter.counts(of: &edgeKeys)
+    let edgeColors = edgeCounts.entries()
       .filter { $0.count >= randomColorsThreshold }
       .sorted { $0.count != $1.count ? $0.count > $1.count : $0.key < $1.key }
 
@@ -333,7 +342,7 @@ extension UIImage {
     //
     // 候选色按原色的出现次数计:曾用提饱和之后新建的颜色去查计数,那个颜色图里从没
     // 出现过,灰色系恒为 0。
-    var ranking = PixelColorRanking(PixelKeyCounter.counts(of: &imageKeys))
+    var ranking = PixelColorRanking(imageCounts.entries())
     while let next = ranking.popMostFrequent() {
       let color: UIColor = color(of: next.key).color(minSaturation: 0.15)
       guard color.isDark == !isDarkBackgound else { continue }
@@ -360,51 +369,60 @@ extension UIImage {
   }
 }
 
-/// 给一批 24 位像素键计数。
-private enum PixelKeyCounter {
-  /// 把键排好序并按段计数,返回 (键, 次数),键升序。会打乱 keys 的内容。
-  ///
-  /// 两趟 12 位的 LSD 基数排序:键只有 24 位,两趟正好覆盖;每趟一次计数、一次分配,
-  /// 总共 O(n),没有比较、没有哈希。2.x 用 `[UInt32: Int]` 字典逐像素计数,
-  /// 250×250 的图就是六万多次 SipHash 加探测。
-  static func counts(of keys: inout [UInt32]) -> [(key: UInt32, count: Int)] {
-    guard !keys.isEmpty else { return [] }
-    var scratch = [UInt32](repeating: 0, count: keys.count)
-    for shift: UInt32 in [0, 12] {
-      keys.withUnsafeBufferPointer { source in
-        scratch.withUnsafeMutableBufferPointer { destination in
-          // starts[b] 先数出每个桶的大小,再换成每个桶在 destination 里的起点。
-          var starts = [Int](repeating: 0, count: 4097)
-          for key in source {
-            starts[Int((key >> shift) & 0xFFF) + 1] += 1
-          }
-          for bucket in 1...4096 {
-            starts[bucket] += starts[bucket - 1]
-          }
-          for key in source {
-            let bucket = Int((key >> shift) & 0xFFF)
-            destination[starts[bucket]] = key
-            starts[bucket] += 1
-          }
-        }
-      }
-      swap(&keys, &scratch)
-    }
+/// 24 位像素键的计数表:开放寻址、线性探测,一次乘法做哈希。只活在一次取色里。
+///
+/// 2.x 用 `[UInt32: Int]` 逐像素计数,每个像素一次 SipHash 加探测。这里每个槽是一个
+/// UInt64:高 32 位是次数,低 32 位是"键 + 1"(0 表示空槽,键只有 24 位,加一不会溢出)。
+/// 表放在一块 calloc 来的连续内存里 —— 操作系统给的新页本来就是零,颜色少的图只会
+/// 碰到其中几页;取结果时也只走用过的槽,不扫整张表。
+private struct PixelKeyCounts: ~Copyable {
+  private let slots: UnsafeMutablePointer<UInt64>
+  private let mask: Int
+  private let shift: UInt32
+  /// 用过的槽位,按首次出现的顺序。
+  private var occupied: [Int] = []
 
-    var runs: [(key: UInt32, count: Int)] = []
-    var current = keys[0]
-    var count = 0
-    for key in keys {
-      if key == current {
-        count += 1
-      } else {
-        runs.append((current, count))
-        current = key
-        count = 1
+  /// 不同颜色最多 min(像素数, 2^24) 种;表长取不小于它两倍的 2 的幂,负载因子不超过 1/2。
+  /// 内存不够时返回 nil(取色按"找不到颜色"回落),不强解包。
+  init?(pixelCount: Int) {
+    let distinctBound = max(1, min(pixelCount, 1 << 24))
+    var bits = 4
+    while (1 << bits) < distinctBound * 2 { bits += 1 }
+    guard let memory = calloc(1 << bits, MemoryLayout<UInt64>.size) else { return nil }
+    slots = memory.assumingMemoryBound(to: UInt64.self)
+    mask = (1 << bits) - 1
+    shift = UInt32(32 - bits)
+  }
+
+  deinit {
+    free(slots)
+  }
+
+  mutating func add(_ key: UInt32, count: Int) {
+    let tag = key &+ 1
+    // Fibonacci hashing:乘以 2^32 / φ 后取高位作为槽号。
+    var index = Int(truncatingIfNeeded: (tag &* 0x9E37_79B1) >> shift)
+    while true {
+      let slot = slots[index]
+      if UInt32(truncatingIfNeeded: slot) == tag {
+        slots[index] = slot &+ (UInt64(count) << 32)
+        return
       }
+      if slot == 0 {
+        slots[index] = (UInt64(count) << 32) | UInt64(tag)
+        occupied.append(index)
+        return
+      }
+      index = (index + 1) & mask
     }
-    runs.append((current, count))
-    return runs
+  }
+
+  /// (键, 次数),顺序不定 —— 两个消费者都自己定序。
+  func entries() -> [(key: UInt32, count: Int)] {
+    occupied.map { index in
+      let slot = slots[index]
+      return (UInt32(truncatingIfNeeded: slot) &- 1, Int(slot >> 32))
+    }
   }
 }
 
